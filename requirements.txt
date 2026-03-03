@@ -1,0 +1,23 @@
+# LOREON Metagenomic Pipeline Requirements
+# Python 3.8+
+
+# Core dependencies
+biopython>=1.79
+pandas>=1.3.0
+numpy>=1.21.0
+duckdb>=0.8.0
+
+# Excel support
+openpyxl>=3.0.0
+
+# GUI (PyQt5)
+PyQt5>=5.15.0
+
+# Report generation
+plotly>=5.0.0
+jinja2>=3.0.0
+
+# External dependencies (must be installed separately):
+# - minimap2 (https://github.com/lh3/minimap2)
+# - samtools (http://www.htslib.org/)
+# - awk (usually pre-installed on Linux/macOS)

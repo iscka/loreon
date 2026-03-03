@@ -1,0 +1,45 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "LOREON: Long-Read ONT Metagenomic Pipeline"
+version: "2.6"
+date-released: 2025-01-01
+authors:
+  - family-names: Mosca
+    given-names: Roberto
+    affiliation: "University of Perugia, Department of Pharmaceutical Sciences"
+repository-code: "https://github.com/iscka/loreon"
+license: MIT
+keywords:
+  - metagenomics
+  - "Oxford Nanopore Technologies"
+  - "ITS barcoding"
+  - fungi
+  - bioinformatics
+  - "long-read sequencing"
+abstract: >
+  LOREON (Long-Read ONT Metagenomic Pipeline) is a comprehensive
+  bioinformatics pipeline for processing Oxford Nanopore Technologies (ONT)
+  long-read metagenomic sequencing data, specifically designed for fungal
+  ITS barcode analysis. It integrates minimap2 alignment, samtools filtering,
+  DuckDB-based OTU aggregation, and an interactive HTML report generator
+  into a single PyQt5 graphical interface.
+references:
+  - type: software
+    title: minimap2
+    authors:
+      - family-names: Li
+        given-names: Heng
+    year: 2018
+    doi: 10.1093/bioinformatics/bty191
+  - type: database
+    title: "UNITE fungal ITS database"
+    authors:
+      - name: "UNITE Community"
+    year: 2024
+    url: "https://unite.ut.ee"
+  - type: software
+    title: DuckDB
+    authors:
+      - name: "DuckDB Foundation"
+    url: "https://duckdb.org"
