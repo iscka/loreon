@@ -1,0 +1,12 @@
+pipeline_gui.py
+pipeline_worker.py
+fileorganizer.py
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.claude/
+*.xlsx
+*.html
+*.sam
+*.log

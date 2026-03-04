@@ -337,7 +337,7 @@ folder/
 If you use this pipeline in your research, please cite:
 
 ```
-Mosca, R. (2025). LOREON: Long-Read ONT Metagenomic Pipeline (v2.6).
+Scarponi, R. (2025). LOREON: Long-Read ONT Metagenomic Pipeline (v2.6).
 University of Perugia. https://github.com/iscka/loreon
 ```
 
@@ -349,7 +349,7 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 
 ## Authors
 
-- Roberto Mosca - University of Perugia
+- Roberto Scarponi - University of Perugia
 - Developed in collaboration with the Microbiology Laboratory
 - Based on research by Angela Conti, Gianluigi Cardinali, and colleagues
 

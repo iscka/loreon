@@ -5,7 +5,7 @@ title: "LOREON: Long-Read ONT Metagenomic Pipeline"
 version: "2.6"
 date-released: 2025-01-01
 authors:
-  - family-names: Mosca
+  - family-names: Scarponi
     given-names: Roberto
     affiliation: "University of Perugia, Department of Pharmaceutical Sciences"
 repository-code: "https://github.com/iscka/loreon"

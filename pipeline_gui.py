@@ -1,21 +1,67 @@
 #!/usr/bin/env python3
 
+import shutil
+import subprocess
 import sys
 import multiprocessing
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
-    QFileDialog, QSpinBox
+    QFileDialog, QSpinBox, QDialog, QDialogButtonBox
 )
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal
+from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess
 from PyQt5.QtGui import QDesktopServices
 
 try:
-    from pipeline_worker import PipelineWorker
+    from pipeline_worker import PipelineWorker, DOCKER_IMAGE
 except ImportError:
     print("ERROR: Cannot find 'pipeline_worker.py'.")
     sys.exit(1)
+
+
+class DockerBuildDialog(QDialog):
+    """Dialog that runs 'docker build' and shows live output."""
+
+    def __init__(self, build_dir, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Building Docker Image")
+        self.setMinimumSize(700, 400)
+        self.build_dir = build_dir
+
+        layout = QVBoxLayout()
+        self.log = QPlainTextEdit()
+        self.log.setReadOnly(True)
+        self.log.setStyleSheet(
+            "font-family: 'Courier New', monospace; background-color: #2b2b2b; color: #f0f0f0;"
+        )
+        layout.addWidget(self.log)
+
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        self.buttons.button(QDialogButtonBox.Close).setEnabled(False)
+        self.buttons.rejected.connect(self.reject)
+        layout.addWidget(self.buttons)
+        self.setLayout(layout)
+
+        self.process = QProcess(self)
+        self.process.setProcessChannelMode(QProcess.MergedChannels)
+        self.process.readyRead.connect(self._on_output)
+        self.process.finished.connect(self._on_finished)
+
+    def start_build(self):
+        self.log.appendPlainText(f"[INFO] Running: docker build -t {DOCKER_IMAGE} {self.build_dir}\n")
+        self.process.start("docker", ["build", "-t", DOCKER_IMAGE, self.build_dir])
+
+    def _on_output(self):
+        data = self.process.readAll().data().decode("utf-8", errors="replace")
+        self.log.appendPlainText(data)
+
+    def _on_finished(self, exit_code, _exit_status):
+        if exit_code == 0:
+            self.log.appendPlainText(f"\n[SUCCESS] Image '{DOCKER_IMAGE}' built successfully.")
+        else:
+            self.log.appendPlainText(f"\n[ERROR] Build failed (exit code {exit_code}).")
+        self.buttons.button(QDialogButtonBox.Close).setEnabled(True)
 
 
 class MainWindow(QMainWindow):
@@ -25,7 +71,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("LOREON Metagenomic Pipeline (OTU Gen v3.3 GUI)")
-        self.setGeometry(100, 100, 900, 700)
+        self.setGeometry(100, 100, 900, 750)
         self.is_running = False
         self.init_ui()
         self.setup_worker_thread()
@@ -117,6 +163,34 @@ class MainWindow(QMainWindow):
         options_group.setLayout(options_layout)
         main_layout.addWidget(options_group)
 
+        # --- Docker section ---
+        docker_group = QGroupBox("3. Docker (required on Windows)")
+        docker_layout = QHBoxLayout()
+
+        self.docker_check = QCheckBox("Use Docker  (minimap2 + samtools run inside container)")
+        docker_layout.addWidget(self.docker_check)
+
+        self.docker_status_label = QLabel("Status: unknown")
+        docker_layout.addWidget(self.docker_status_label)
+
+        docker_layout.addStretch()
+
+        self.docker_check_btn = QPushButton("Check Image")
+        self.docker_check_btn.setToolTip(f"Verify that the Docker image '{DOCKER_IMAGE}' exists")
+        self.docker_check_btn.clicked.connect(self.check_docker_image)
+        docker_layout.addWidget(self.docker_check_btn)
+
+        self.docker_build_btn = QPushButton("Build Image")
+        self.docker_build_btn.setToolTip(
+            f"Build the Docker image '{DOCKER_IMAGE}' from the Dockerfile in the app folder"
+        )
+        self.docker_build_btn.clicked.connect(self.build_docker_image)
+        docker_layout.addWidget(self.docker_build_btn)
+
+        docker_group.setLayout(docker_layout)
+        main_layout.addWidget(docker_group)
+        # --- End Docker section ---
+
         button_layout = QHBoxLayout()
         self.run_btn = QPushButton("START PIPELINE")
         self.run_btn.setStyleSheet(
@@ -190,12 +264,67 @@ class MainWindow(QMainWindow):
         self.status_bar.setValue(percentage)
         self.status_bar.setFormat(text)
 
+    # --- Docker helpers ---
+
+    def _docker_available(self):
+        return shutil.which("docker") is not None
+
+    def check_docker_image(self):
+        if not self._docker_available():
+            self.docker_status_label.setText("Status: Docker NOT found")
+            QMessageBox.warning(self, "Docker not found",
+                                "Docker is not installed or not in PATH.\n"
+                                "Install Docker Desktop: https://www.docker.com/products/docker-desktop")
+            return
+        try:
+            result = subprocess.run(
+                ["docker", "images", "-q", DOCKER_IMAGE],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                self.docker_status_label.setText(f"Status: image '{DOCKER_IMAGE}' ready")
+                QMessageBox.information(self, "Docker OK", f"Image '{DOCKER_IMAGE}' found and ready.")
+            else:
+                self.docker_status_label.setText("Status: image NOT found")
+                QMessageBox.warning(self, "Image not found",
+                                    f"Image '{DOCKER_IMAGE}' not found.\n"
+                                    "Click 'Build Image' to create it.")
+        except Exception as e:
+            self.docker_status_label.setText("Status: error")
+            QMessageBox.critical(self, "Error", f"Cannot check Docker image:\n{e}")
+
+    def build_docker_image(self):
+        if not self._docker_available():
+            QMessageBox.warning(self, "Docker not found",
+                                "Docker is not installed or not in PATH.")
+            return
+        import os
+        build_dir = str(Path(__file__).parent)
+        dlg = DockerBuildDialog(build_dir, parent=self)
+        dlg.show()
+        dlg.start_build()
+        dlg.exec_()
+        self.check_docker_image()
+
+    # --- Pipeline execution ---
+
     def run_pipeline(self):
         if self.is_running:
             QMessageBox.warning(self, "Warning", "Pipeline is already running.")
             return
+
+        use_docker = self.docker_check.isChecked()
+        if use_docker and not self._docker_available():
+            QMessageBox.critical(self, "Docker not found",
+                                 "Docker mode is enabled but Docker is not in PATH.\n"
+                                 "Install Docker Desktop or disable Docker mode.")
+            return
+
         self.log_output.clear()
         self.append_log("--- STARTING PIPELINE ---")
+        if use_docker:
+            self.append_log(f"[INFO] Docker mode: pipeline will run inside '{DOCKER_IMAGE}'")
+
         settings = {
             "input_dir": self.input_dir_label.text(),
             "output_dir": self.output_dir_label.text(),
@@ -211,6 +340,7 @@ class MainWindow(QMainWindow):
             "window_size": self.window_input.value(),
             "open_report": self.open_report_check.isChecked(),
             "force_tax_map": self.force_tax_map_check.isChecked(),
+            "use_docker": use_docker,
         }
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
             QMessageBox.critical(self, "Error", "Input, Output and Database paths are mandatory.")
@@ -264,7 +394,8 @@ class MainWindow(QMainWindow):
                        self.open_report_check, self.filter_check, self.min_len_input,
                        self.max_len_input, self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
-                       self.force_tax_map_check]:
+                       self.force_tax_map_check, self.docker_check,
+                       self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
 
     def closeEvent(self, event):

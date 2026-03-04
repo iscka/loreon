@@ -4,6 +4,8 @@ from pathlib import Path
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
+DOCKER_IMAGE = "loreon:latest"
+
 
 class PipelineWorker(QObject):
 
@@ -26,37 +28,10 @@ class PipelineWorker(QObject):
         self.settings = settings
 
         try:
-            python_exe = sys.executable
-            script_path = str(Path(__file__).parent / "metaGenomics_new.py")
+            use_docker = settings.get("use_docker", False)
 
-            cmd_list = [
-                python_exe,
-                script_path,
-                "-i", self.settings["input_dir"],
-                "-o", self.settings["output_dir"],
-                "-d", self.settings["db_path"],
-                "-f", self.settings["format"],
-                "-T", str(self.settings["total_threads"]),
-                "-t", str(self.settings["threads_per_job"]),
-                "-k", str(self.settings["kmer_size"]),
-                "-w", str(self.settings["window_size"]),
-            ]
-
-            if self.settings["debug"]:
-                cmd_list.append("--debug")
-
-            if self.settings["enable_filter"]:
-                cmd_list.extend(["-min", str(self.settings["min_len"])])
-                cmd_list.extend(["-max", str(self.settings["max_len"])])
-            else:
-                self.log_signal.emit("[INFO] Length filter disabled.")
-                cmd_list.extend(["-min", "0"])
-                cmd_list.extend(["-max", "999999"])
-
-            if self.settings.get("force_tax_map", False):
-                cmd_list.append("--force-tax-map")
-
-            success_pipeline = self.run_process(cmd_list)
+            cmd_pipeline = self._build_docker_pipeline_cmd() if use_docker else self._build_native_pipeline_cmd()
+            success_pipeline = self.run_process(cmd_pipeline)
 
             if not self.is_running or not success_pipeline:
                 self.finished_signal.emit(False, None)
@@ -65,31 +40,7 @@ class PipelineWorker(QObject):
 
             self.progress_signal.emit(95, "Step 4: HTML Report generation...")
 
-            report_script_path = str(Path(__file__).parent / "report_generator.py")
-
-            analysis_name = Path(self.settings["output_dir"]).name
-            db_name = Path(self.settings["db_path"]).stem
-
-            min_len_report = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
-            max_len_report = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
-            filter_report = Path(
-                self.settings["output_dir"]) / f"report_filtering_{min_len_report}_{max_len_report}.xlsx"
-            otu_filename = f"OTU_Table_{analysis_name}_{db_name}.xlsx"
-            otu_table = Path(self.settings["output_dir"]) / otu_filename
-
-            html_report_name = f"Report_{analysis_name}_{db_name}.html"
-            html_report_path = Path(self.settings["output_dir"]) / html_report_name
-            project_title = f"Report: {analysis_name} (DB: {db_name})"
-
-            cmd_report = [
-                python_exe,
-                report_script_path,
-                "-f", str(filter_report),
-                "-otu", str(otu_table),
-                "-o", str(html_report_path),
-                "-pn", project_title
-            ]
-
+            cmd_report = self._build_docker_report_cmd() if use_docker else self._build_native_report_cmd()
             success_report = self.run_process(cmd_report)
 
             if not success_report:
@@ -99,7 +50,7 @@ class PipelineWorker(QObject):
                 return
 
             self.progress_signal.emit(100, "Completed!")
-            self.finished_signal.emit(True, str(html_report_path))
+            self.finished_signal.emit(True, str(self._html_report_path()))
 
         except Exception as e:
             self.log_signal.emit("--- WORKER CRITICAL ERROR ---")
@@ -108,6 +59,101 @@ class PipelineWorker(QObject):
 
         finally:
             self.is_running = False
+
+    # --- Command builders ---
+
+    def _pipeline_args(self, input_dir, output_dir, db_path):
+        cmd = [
+            "-i", str(input_dir),
+            "-o", str(output_dir),
+            "-d", str(db_path),
+            "-f", self.settings["format"],
+            "-T", str(self.settings["total_threads"]),
+            "-t", str(self.settings["threads_per_job"]),
+            "-k", str(self.settings["kmer_size"]),
+            "-w", str(self.settings["window_size"]),
+        ]
+        if self.settings["debug"]:
+            cmd.append("--debug")
+        if self.settings["enable_filter"]:
+            cmd.extend(["-min", str(self.settings["min_len"]),
+                        "-max", str(self.settings["max_len"])])
+        else:
+            self.log_signal.emit("[INFO] Length filter disabled.")
+            cmd.extend(["-min", "0", "-max", "999999"])
+        if self.settings.get("force_tax_map", False):
+            cmd.append("--force-tax-map")
+        return cmd
+
+    def _report_names(self):
+        output_dir = Path(self.settings["output_dir"])
+        analysis_name = output_dir.name
+        db_name = Path(self.settings["db_path"]).stem
+        min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
+        max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
+        return {
+            "filter_report": f"report_filtering_{min_len}_{max_len}.xlsx",
+            "otu_table": f"OTU_Table_{analysis_name}_{db_name}.xlsx",
+            "html_report": f"Report_{analysis_name}_{db_name}.html",
+            "project_title": f"Report: {analysis_name} (DB: {db_name})",
+        }
+
+    def _html_report_path(self):
+        names = self._report_names()
+        return Path(self.settings["output_dir"]) / names["html_report"]
+
+    def _build_native_pipeline_cmd(self):
+        script_path = str(Path(__file__).parent / "metaGenomics_new.py")
+        return [sys.executable, script_path] + self._pipeline_args(
+            self.settings["input_dir"],
+            self.settings["output_dir"],
+            self.settings["db_path"],
+        )
+
+    def _build_native_report_cmd(self):
+        script_path = str(Path(__file__).parent / "report_generator.py")
+        output_dir = Path(self.settings["output_dir"])
+        names = self._report_names()
+        return [
+            sys.executable, script_path,
+            "-f", str(output_dir / names["filter_report"]),
+            "-otu", str(output_dir / names["otu_table"]),
+            "-o", str(output_dir / names["html_report"]),
+            "-pn", names["project_title"],
+        ]
+
+    def _docker_base_cmd(self):
+        input_dir = Path(self.settings["input_dir"])
+        output_dir = Path(self.settings["output_dir"])
+        db_path = Path(self.settings["db_path"])
+        return [
+            "docker", "run", "--rm",
+            "-v", f"{input_dir}:/data/input:ro",
+            "-v", f"{output_dir}:/data/output",
+            "-v", f"{db_path.parent}:/data/db:ro",
+            DOCKER_IMAGE,
+        ]
+
+    def _build_docker_pipeline_cmd(self):
+        db_filename = Path(self.settings["db_path"]).name
+        args = self._pipeline_args(
+            input_dir="/data/input",
+            output_dir="/data/output",
+            db_path=f"/data/db/{db_filename}",
+        )
+        return self._docker_base_cmd() + ["python3", "/app/metaGenomics_new.py"] + args
+
+    def _build_docker_report_cmd(self):
+        names = self._report_names()
+        return self._docker_base_cmd() + [
+            "python3", "/app/report_generator.py",
+            "-f", f"/data/output/{names['filter_report']}",
+            "-otu", f"/data/output/{names['otu_table']}",
+            "-o", f"/data/output/{names['html_report']}",
+            "-pn", names["project_title"],
+        ]
+
+    # --- Process execution (unchanged) ---
 
     def run_process(self, command_list):
         if not self.is_running:
