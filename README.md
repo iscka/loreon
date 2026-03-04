@@ -10,8 +10,10 @@ A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technolog
 - **OTU Table Generation**: Automated OTU (Operational Taxonomic Unit) aggregation with DuckDB
 - **Interactive Reports**: HTML reports with Plotly visualizations
 - **Multiple Database Formats**: Support for UNITE, SILVA, CBS, Eukariome, and custom formats
-- **GUI Interface**: User-friendly PyQt5 graphical interface
+- **GUI Interface**: User-friendly PyQt5 graphical interface with splash screen and system tray icon
 - **Taxonomy Mapping**: Intelligent caching system for taxonomic information
+- **Windows Support**: Native Docker-based execution on Windows via standalone executable
+- **Performance Profiling**: Optional per-step metrics with JSON and Word report output
 
 ## System Requirements
 
@@ -21,6 +23,8 @@ A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technolog
 - [minimap2](https://github.com/lh3/minimap2) >= 2.17
 - [samtools](http://www.htslib.org/) >= 1.10
 - awk (pre-installed on most Unix systems)
+
+> **Windows users**: external tools are not required — they run automatically inside the Docker container. See the [Windows section](#windows-docker-mode) below.
 
 **Python** >= 3.8
 
@@ -37,6 +41,7 @@ Key packages:
 - PyQt5 >= 5.15.0 (for GUI)
 - plotly >= 5.0.0 (for reports)
 - jinja2 >= 3.0.0
+- python-docx >= 1.1.0 (for Word profiling reports)
 
 ## Installation
 
@@ -61,6 +66,67 @@ pip install -r requirements.txt
 ```bash
 pip install -r requirements.txt
 ```
+
+---
+
+## Windows — Docker Mode
+
+On Windows, LOREON runs entirely via Docker: minimap2, samtools and the pipeline execute inside a Linux container, while the GUI runs natively on the host.
+
+### Prerequisites
+
+- [Docker Desktop for Windows](https://www.docker.com/products/docker-desktop/) (with WSL 2 backend)
+- Python >= 3.8 on the host (for the GUI)
+
+### Quick Start — Standalone Executable
+
+The easiest way to run LOREON on Windows is the pre-built executable:
+
+1. Download or build `dist/LOREON/LOREON.exe` (see [Building the executable](#building-the-executable))
+2. Double-click `LOREON.exe`
+3. In the GUI, check **Use Docker** and click **Build Image** (first run only)
+4. Select input folder, database file and output folder
+5. Click **START PIPELINE**
+
+Default data directories (created automatically on first run):
+
+| Purpose | Host path | Container path |
+|---------|-----------|----------------|
+| Input FASTQ | `%USERPROFILE%\Documents\loreon\data` | `/data/input` |
+| Results | `%USERPROFILE%\Documents\loreon\results` | `/data/output` |
+| Database | `%USERPROFILE%\Documents\loreon\db` | `/data/db` |
+
+### Building the Executable
+
+```bat
+build_exe.bat
+```
+
+The script:
+1. Installs PyInstaller and Pillow if missing
+2. Converts `loreon_app_icon_2.png` to `.ico`
+3. Builds `dist/LOREON/LOREON.exe` with the icon embedded
+4. Copies all Docker context files into `dist/LOREON/`
+
+### GUI Features (Windows)
+
+| Feature | Description |
+|---------|-------------|
+| Splash screen | Logo displayed at startup |
+| Title bar icon | Application icon in window chrome and taskbar |
+| System tray icon | Right-click for *Mostra / Esci*; double-click to restore |
+| Build Image | Builds the Docker image from inside the GUI |
+| Check Image | Verifies that `loreon:latest` is available |
+
+### Command-Line (bash / Git Bash)
+
+```bash
+./run_loreon.sh -d database.fasta -f unite
+```
+
+`run_loreon.sh` creates the data directories automatically and launches the container with the correct volume mounts.
+
+---
 
 ## Usage
 
@@ -122,6 +188,7 @@ python metaGenomics_new.py \
 
 **Other:**
 - `--debug`: Enable verbose debug output
+- `--profile`: Enable performance profiling (see [Performance Profiling](#performance-profiling))
 
 ## Pipeline Workflow
 
@@ -190,7 +257,9 @@ output_folder/
 ├── report_filtering_200_300.xlsx  # Filter statistics
 ├── OTU_Table_[name]_[db].xlsx     # Final OTU table with taxonomy
 ├── Report_[name]_[db].html        # Interactive HTML report
-└── [db]_taxonomy_map.tsv          # Taxonomy cache
+├── [db]_taxonomy_map.tsv          # Taxonomy cache
+├── profile_report.json            # Profiling data (if --profile)
+└── profile_report.docx            # Profiling Word report (if --profile)
 ```
 
 ## Supported Database Formats
@@ -212,6 +281,43 @@ Custom eukaryotic database format
 
 ### None
 No taxonomy parsing - uses raw sequence IDs
+
+## Performance Profiling
+
+Enable with `--profile` flag (CLI) or the **Enable Performance Profiling** checkbox in the GUI.
+
+At the end of the run, two files are written to the output folder:
+
+- `profile_report.json` — raw structured data
+- `profile_report.docx` — formatted Word table (blue header, alternating rows, TOTAL footer)
+
+### Metrics collected per step
+
+| Metric | Unit | Description |
+|--------|------|-------------|
+| `wall_time_s` | seconds | Elapsed clock time for the step |
+| `cpu_time_s` | seconds | CPU time consumed (user + system) |
+| `mem_mb` | MB | Resident memory (RSS) at step end |
+| `taxonomy_entries` | count | Entries parsed from the reference DB *(Step 0)* |
+| `sequences_total` | count | Total sequences submitted to filter *(Step 1)* |
+| `sequences_good` | count | Sequences passing the length filter *(Step 1)* |
+| `sequences_bad` | count | Sequences discarded by the filter *(Step 1)* |
+| `throughput_seq_s` | seq/s | Filter throughput *(Step 1)* |
+| `files_to_map` | count | FASTQ files submitted to mapping *(Step 2)* |
+| `success` | count | Files mapped successfully *(Step 2)* |
+| `failed` | count | Files that failed mapping *(Step 2)* |
+
+The summary is also printed in the execution log at the end of the run.
+
+### CLI example
+
+```bash
+python metaGenomics_new.py \
+  -i /data/input -o /data/output -d /data/db/unite.fasta \
+  -f unite --profile
+```
+
+---
 
 ## Performance Optimization
 
@@ -372,6 +478,9 @@ For bug reports and feature requests, please open an issue on GitHub.
 - Force taxonomy map recreation option
 - Improved GUI with persistent worker thread
 - Enhanced error handling
+- **Windows Docker mode**: standalone executable, Docker volume mounts, `run_loreon.sh`
+- **GUI enhancements**: splash screen, window/taskbar/tray icon, Build Image dialog
+- **Performance profiling**: `--profile` flag, `PipelineProfiler` class, JSON + Word report output
 
 ### v2.x
 - DuckDB-based OTU aggregation

@@ -4,14 +4,31 @@ import shutil
 import subprocess
 import sys
 import multiprocessing
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
-    QFileDialog, QSpinBox, QDialog, QDialogButtonBox
+    QFileDialog, QSpinBox, QDialog, QDialogButtonBox,
+    QSystemTrayIcon, QMenu, QSplashScreen
 )
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess
-from PyQt5.QtGui import QDesktopServices
+from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt
+from PyQt5.QtGui import QDesktopServices, QIcon, QPixmap
+
+
+def _get_base_dir():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
+def _load_icon():
+    base = _get_base_dir()
+    for name in ('loreon_app_icon_2.ico', 'loreon_app_icon_2.png'):
+        p = base / name
+        if p.exists():
+            return QIcon(str(p))
+    return QIcon()
 
 try:
     from pipeline_worker import PipelineWorker, DOCKER_IMAGE
@@ -73,8 +90,11 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LOREON Metagenomic Pipeline (OTU Gen v3.3 GUI)")
         self.setGeometry(100, 100, 900, 750)
         self.is_running = False
+        icon = _load_icon()
+        self.setWindowIcon(icon)
         self.init_ui()
         self.setup_worker_thread()
+        self._setup_tray(icon)
 
     def init_ui(self):
         main_layout = QVBoxLayout()
@@ -118,6 +138,12 @@ class MainWindow(QMainWindow):
             "Useful if the database has been updated."
         )
         options_left_layout.addWidget(self.force_tax_map_check)
+        self.profile_check = QCheckBox("Enable Performance Profiling")
+        self.profile_check.setToolTip(
+            "Saves profile_report.json in the output folder with wall time,\n"
+            "CPU time, memory and domain metrics for each pipeline step."
+        )
+        options_left_layout.addWidget(self.profile_check)
         options_layout.addLayout(options_left_layout)
 
         filter_box = QGroupBox("Length Filter")
@@ -298,8 +324,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Docker not found",
                                 "Docker is not installed or not in PATH.")
             return
-        import os
-        build_dir = str(Path(__file__).parent)
+        if getattr(sys, 'frozen', False):
+            build_dir = str(Path(sys.executable).parent)
+        else:
+            build_dir = str(Path(__file__).parent)
         dlg = DockerBuildDialog(build_dir, parent=self)
         dlg.show()
         dlg.start_build()
@@ -340,6 +368,7 @@ class MainWindow(QMainWindow):
             "window_size": self.window_input.value(),
             "open_report": self.open_report_check.isChecked(),
             "force_tax_map": self.force_tax_map_check.isChecked(),
+            "profile": self.profile_check.isChecked(),
             "use_docker": use_docker,
         }
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
@@ -394,9 +423,27 @@ class MainWindow(QMainWindow):
                        self.open_report_check, self.filter_check, self.min_len_input,
                        self.max_len_input, self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
-                       self.force_tax_map_check, self.docker_check,
+                       self.force_tax_map_check, self.profile_check, self.docker_check,
                        self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
+
+    def _setup_tray(self, icon):
+        self.tray_icon = QSystemTrayIcon(icon, self)
+        tray_menu = QMenu()
+        show_action = tray_menu.addAction("Mostra")
+        show_action.triggered.connect(self.show)
+        quit_action = tray_menu.addAction("Esci")
+        quit_action.triggered.connect(QApplication.quit)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.setToolTip("LOREON Pipeline")
+        self.tray_icon.activated.connect(self._on_tray_activated)
+        self.tray_icon.show()
+
+    def _on_tray_activated(self, reason):
+        if reason == QSystemTrayIcon.DoubleClick:
+            self.show()
+            self.raise_()
+            self.activateWindow()
 
     def closeEvent(self, event):
         if self.is_running:
@@ -419,6 +466,24 @@ class MainWindow(QMainWindow):
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     app = QApplication(sys.argv)
+
+    icon = _load_icon()
+    app.setWindowIcon(icon)
+
+    splash = None
+    png_path = _get_base_dir() / 'loreon_app_icon_2.png'
+    if png_path.exists():
+        pixmap = QPixmap(str(png_path)).scaled(
+            300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        splash = QSplashScreen(pixmap, Qt.WindowStaysOnTopHint)
+        splash.show()
+        app.processEvents()
+
     window = MainWindow()
     window.show()
+
+    if splash:
+        splash.finish(window)
+
     sys.exit(app.exec_())

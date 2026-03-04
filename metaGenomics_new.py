@@ -81,6 +81,11 @@ def parse_arguments():
         help="Force recreation of the taxonomy map in the output folder.",
         action="store_true"
     )
+    other_group.add_argument(
+        "--profile",
+        help="Enable performance profiling. Saves profile_report.json to the output folder.",
+        action="store_true"
+    )
     return parser.parse_args()
 
 
@@ -131,6 +136,15 @@ def main():
     print("--- Metagenomic Pipeline Start (v2.6) ---")
     check_dependencies()
 
+    profiler = None
+    if options.profile:
+        try:
+            from pipeline_profiler import PipelineProfiler
+            profiler = PipelineProfiler()
+            print("[PROFILER] Performance profiling enabled.")
+        except ImportError:
+            print("[PROFILER] WARNING: pipeline_profiler.py not found. Profiling disabled.")
+
     input_dir = Path(options.input_dir)
     output_dir = Path(options.output_dir)
     db_path = Path(options.db_path)
@@ -149,6 +163,8 @@ def main():
 
     print(f"OTU Table output file: {otu_filename}")
 
+    if profiler:
+        profiler.start_step('Step 0: Taxonomy')
     print(f"\n--- STEP 0: Taxonomy Parsing on Database (Format: {options.format}) ---")
     tax_map_filename = f"{db_path.stem}_taxonomy_map.tsv"
     db_map_path = db_path.parent / tax_map_filename
@@ -192,6 +208,12 @@ def main():
         print("CRITICAL ERROR: Taxonomy map not found and not created.")
         sys.exit(1)
 
+    if profiler:
+        tax_entries = sum(1 for _ in open(generated_tax_map_path)) - 1 if generated_tax_map_path.exists() else 0
+        profiler.end_step('Step 0: Taxonomy', taxonomy_entries=tax_entries)
+
+    if profiler:
+        profiler.start_step('Step 1: Filter')
     print(f"\n--- STEP 1: Sequence Filter (Min: {options.min_len}, Max: {options.max_len}) ---")
 
     try:
@@ -234,6 +256,19 @@ def main():
         print(f"CRITICAL ERROR during filtering pool: {e}")
         sys.exit(1)
 
+    if profiler:
+        total_good = sum(s.get('good_count', 0) for s in filter_stats_list)
+        total_bad = sum(s.get('bad_count', 0) for s in filter_stats_list)
+        total_seq = sum(s.get('total_count', 0) for s in filter_stats_list)
+        wall_s = profiler._steps.get('Step 1: Filter', {}).get('wall_time_s') or 0
+        throughput = round(total_seq / wall_s) if wall_s > 0 else 0
+        profiler.end_step('Step 1: Filter',
+                          directories=len(directories_to_process),
+                          sequences_total=total_seq,
+                          sequences_good=total_good,
+                          sequences_bad=total_bad,
+                          throughput_seq_s=throughput)
+        profiler.start_step('Step 1.5: Filter Report')
     print("\n--- STEP 1.5: Filtering Report ---")
     if not filter_stats_list:
         print("No stats available. Skipping report generation.")
@@ -257,6 +292,9 @@ def main():
         except Exception as e:
             print(f"ERROR during filtering report creation: {e}")
 
+    if profiler:
+        profiler.end_step('Step 1.5: Filter Report')
+        profiler.start_step('Step 2: Mapping')
     print("\n--- Step 2: Mapping and Tabeling ---")
 
     fastq_files_to_process = [
@@ -309,6 +347,13 @@ def main():
         print(f"CRITICAL ERROR during mapping pool: {e}")
         sys.exit(1)
 
+    if profiler:
+        success_count_p = sum(1 for _, s in results if s == "Success")
+        profiler.end_step('Step 2: Mapping',
+                          files_to_map=len(fastq_files_to_process),
+                          success=success_count_p,
+                          failed=len(fastq_files_to_process) - success_count_p)
+        profiler.start_step('Step 2.5: Reformat')
     print("\n--- STEP 2.5: Index Reformatting ---")
     try:
         reformat_tmp_indices(
@@ -319,6 +364,9 @@ def main():
     except Exception as e:
         print(f"ERROR during index reformatting: {e}")
 
+    if profiler:
+        profiler.end_step('Step 2.5: Reformat')
+        profiler.start_step('Step 3: OTU Aggregation')
     print("\n--- Step 3: Results Aggregation ---")
 
     try:
@@ -329,6 +377,10 @@ def main():
         )
     except Exception as e:
         print(f"ERROR during final aggregation: {e}")
+
+    if profiler:
+        profiler.end_step('Step 3: OTU Aggregation')
+        profiler.save(output_dir)
 
     print(f"\n--- Pipeline Complete ---")
     print(f"OTU table saved to: {final_output_file.name}")

@@ -7,6 +7,5 @@ __pycache__/
 .git/
 .claude/
 *.xlsx
-*.html
 *.sam
 *.log

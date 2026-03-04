@@ -83,11 +83,16 @@ class PipelineWorker(QObject):
             cmd.extend(["-min", "0", "-max", "999999"])
         if self.settings.get("force_tax_map", False):
             cmd.append("--force-tax-map")
+        if self.settings.get("profile", False):
+            cmd.append("--profile")
         return cmd
 
     def _report_names(self):
         output_dir = Path(self.settings["output_dir"])
-        analysis_name = output_dir.name
+        if self.settings.get("use_docker", False):
+            analysis_name = "output"
+        else:
+            analysis_name = output_dir.name
         db_name = Path(self.settings["db_path"]).stem
         min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
         max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
@@ -130,7 +135,7 @@ class PipelineWorker(QObject):
             "docker", "run", "--rm",
             "-v", f"{input_dir}:/data/input:ro",
             "-v", f"{output_dir}:/data/output",
-            "-v", f"{db_path.parent}:/data/db:ro",
+            "-v", f"{db_path.parent}:/data/db",
             DOCKER_IMAGE,
         ]
 

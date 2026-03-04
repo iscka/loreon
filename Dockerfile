@@ -20,7 +20,10 @@ COPY metaGenomics_new.py \
      ResultsReader.py \
      PipelineLogger.py \
      report_generator.py \
+     pipeline_profiler.py \
      template.html \
      ./
 
 RUN mkdir -p /data/input /data/output /data/db
+
+CMD ["python3", "/app/metaGenomics_new.py", "--help"]
