@@ -10,9 +10,9 @@ from PyQt5.QtWidgets import (
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
     QFileDialog, QSpinBox, QDialog, QDialogButtonBox,
-    QSystemTrayIcon, QMenu, QSplashScreen
+    QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy
 )
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt
+from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop
 from PyQt5.QtGui import QDesktopServices, QIcon, QPixmap
 
 
@@ -81,6 +81,29 @@ class DockerBuildDialog(QDialog):
         self.buttons.button(QDialogButtonBox.Close).setEnabled(True)
 
 
+class _ScaledPixmapLabel(QLabel):
+    """QLabel that fills the full width and adjusts height to preserve aspect ratio."""
+    def __init__(self, pixmap, parent=None):
+        super().__init__(parent)
+        self._src = pixmap
+        self.setAlignment(Qt.AlignCenter)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
+    def hasHeightForWidth(self):
+        return not self._src.isNull()
+
+    def heightForWidth(self, width):
+        if self._src.isNull() or self._src.width() == 0:
+            return 0
+        return int(self._src.height() * width / self._src.width())
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if not self._src.isNull():
+            scaled = self._src.scaledToWidth(self.width(), Qt.SmoothTransformation)
+            super().setPixmap(scaled)
+
+
 class MainWindow(QMainWindow):
     start_pipeline_signal = pyqtSignal(dict)
     stop_pipeline_signal = pyqtSignal()
@@ -97,7 +120,21 @@ class MainWindow(QMainWindow):
         self._setup_tray(icon)
 
     def init_ui(self):
+        outer_layout = QVBoxLayout()
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        # --- Logo banner (edge-to-edge, no margins) ---
+        logo_path = _get_base_dir() / 'loreon.jpeg'
+        if logo_path.exists():
+            logo_label = _ScaledPixmapLabel(QPixmap(str(logo_path)))
+            outer_layout.addWidget(logo_label)
+        # --- End logo banner ---
+
+        inner_widget = QWidget()
         main_layout = QVBoxLayout()
+        inner_widget.setLayout(main_layout)
+        outer_layout.addWidget(inner_widget)
 
         path_group = QGroupBox("1. Paths (Mandatory)")
         path_layout = QGridLayout()
@@ -253,7 +290,7 @@ class MainWindow(QMainWindow):
         self.stop_btn.clicked.connect(self.stop_pipeline)
 
         central_widget = QWidget()
-        central_widget.setLayout(main_layout)
+        central_widget.setLayout(outer_layout)
         self.setCentralWidget(central_widget)
 
     def setup_worker_thread(self):
@@ -470,20 +507,20 @@ if __name__ == "__main__":
     icon = _load_icon()
     app.setWindowIcon(icon)
 
-    splash = None
-    png_path = _get_base_dir() / 'loreon_app_icon_2.png'
-    if png_path.exists():
-        pixmap = QPixmap(str(png_path)).scaled(
-            300, 300, Qt.KeepAspectRatio, Qt.SmoothTransformation
+    jpeg_path = _get_base_dir() / 'loreon.jpeg'
+    if jpeg_path.exists():
+        pixmap = QPixmap(str(jpeg_path)).scaledToWidth(
+            500, Qt.SmoothTransformation
         )
         splash = QSplashScreen(pixmap, Qt.WindowStaysOnTopHint)
         splash.show()
         app.processEvents()
+        loop = QEventLoop()
+        QTimer.singleShot(1000, loop.quit)
+        loop.exec_()
+        splash.close()
 
     window = MainWindow()
     window.show()
-
-    if splash:
-        splash.finish(window)
 
     sys.exit(app.exec_())
