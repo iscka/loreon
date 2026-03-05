@@ -28,7 +28,7 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 
-OutputDir=installer_output
+OutputDir=windows_setup
 OutputBaseFilename=LOREON_Setup_{#AppVersion}
 SetupIconFile=loreon_app_icon_2.ico
 UninstallDisplayIcon={app}\loreon_app_icon_2.ico
