@@ -92,7 +92,7 @@ if not exist "loreon_app_icon_2.ico" (
 )
 
 REM ── Directory di output ─────────────────────────────────────
-if not exist "installer_output" mkdir installer_output
+if not exist "installer_output" mkdir windows_setup
 
 REM ── Compilazione ────────────────────────────────────────────
 echo Compilazione installer in corso...
