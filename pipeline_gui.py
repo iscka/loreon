@@ -10,9 +10,9 @@ from PyQt5.QtWidgets import (
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
     QFileDialog, QSpinBox, QDialog, QDialogButtonBox,
-    QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy
+    QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy, QTextBrowser
 )
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop
+from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop, QSize
 from PyQt5.QtGui import QDesktopServices, QIcon, QPixmap
 
 
@@ -82,12 +82,15 @@ class DockerBuildDialog(QDialog):
 
 
 class _ScaledPixmapLabel(QLabel):
-    """QLabel that fills the full width and adjusts height to preserve aspect ratio."""
+    """QLabel that fills the full width, adjusts height to preserve aspect ratio, and is clickable."""
+    clicked = pyqtSignal()
+
     def __init__(self, pixmap, parent=None):
         super().__init__(parent)
         self._src = pixmap
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.setCursor(Qt.PointingHandCursor)
 
     def hasHeightForWidth(self):
         return not self._src.isNull()
@@ -102,6 +105,38 @@ class _ScaledPixmapLabel(QLabel):
         if not self._src.isNull():
             scaled = self._src.scaledToWidth(self.width(), Qt.SmoothTransformation)
             super().setPixmap(scaled)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class CreditsDialog(QDialog):
+    """Dialog showing license and credits read from credits.md."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("License & Credits — LOREON")
+        self.setMinimumSize(620, 520)
+
+        layout = QVBoxLayout()
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+
+        credits_path = _get_base_dir() / 'credits.md'
+        if credits_path.exists():
+            browser.setMarkdown(credits_path.read_text(encoding='utf-8'))
+        else:
+            browser.setPlainText("Credits file not found.")
+
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self.setLayout(layout)
 
 
 class MainWindow(QMainWindow):
@@ -124,10 +159,11 @@ class MainWindow(QMainWindow):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
-        # --- Logo banner (edge-to-edge, no margins) ---
+        # --- Logo banner (edge-to-edge, clickable) ---
         logo_path = _get_base_dir() / 'loreon.jpeg'
         if logo_path.exists():
             logo_label = _ScaledPixmapLabel(QPixmap(str(logo_path)))
+            logo_label.clicked.connect(self._show_credits)
             outer_layout.addWidget(logo_label)
         # --- End logo banner ---
 
@@ -292,6 +328,9 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         central_widget.setLayout(outer_layout)
         self.setCentralWidget(central_widget)
+
+    def _show_credits(self):
+        CreditsDialog(self).exec_()
 
     def setup_worker_thread(self):
         self.worker_thread = QThread()
