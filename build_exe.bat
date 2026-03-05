@@ -30,6 +30,12 @@ python -m PyInstaller ^
     --windowed ^
     --name LOREON ^
     --icon loreon_app_icon_2.ico ^
+    --hidden-import=_socket ^
+    --hidden-import=select ^
+    --hidden-import=PyQt5.sip ^
+    --hidden-import=encodings.utf_8 ^
+    --hidden-import=encodings.ascii ^
+    --collect-all=PyQt5 ^
     --clean ^
     -y ^
     pipeline_gui.py
