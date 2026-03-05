@@ -1,19 +1,19 @@
-# LOREON — Long-Read ONT Metagenomic Pipeline
+# LOREON — Long-Read ONT MetageNOmic Pipeline
 
-A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technologies (ONT) metagenomic sequencing data, specifically designed for fungal ITS barcode analysis.
+A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technologies (ONT) and other metagenomic sequencing data, specifically designed for fungal ITS, bacteria 16S, SSU or LSU barcode analysis.
 
 ---
 
 ## License
 
-License to be determined — see the `LICENSE` file included in the distribution.
+GNU AFFERO GENERAL PUBLIC LICENSE — see the `LICENSE` file included in the distribution.
 
 ---
 
 ## Authors
 
 - **Roberto Scarponi** — University of Perugia
-- Developed in collaboration with the **Microbiology Laboratory**, University of Perugia
+- Developed in collaboration with the **Microbiology Laboratory**, Biotecnology department of University of Perugia
 - Based on research by **Angela Conti**, **Gianluigi Cardinali**, and colleagues
 
 ---
@@ -22,7 +22,7 @@ License to be determined — see the `LICENSE` file included in the distribution
 
 If you use LOREON in your research, please cite:
 
-> Scarponi, R. (2025). *LOREON: Long-Read ONT Metagenomic Pipeline* (v2.6).
+> Scarponi, R. (2025). *LOREON: Long-Read ONT Metagenomic Pipeline*.
 > University of Perugia. https://github.com/iscka/loreon
 
 A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
@@ -36,6 +36,9 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 - **DuckDB**: High-performance analytical database system.
 - **Plotly**: Interactive visualization library.
 - **PyQt5**: Cross-platform GUI toolkit.
+- **SILVA database**: Quast C, Pruesse E, Yilmaz P, Gerken J, Schweer T, Yarza P, Peplies J, Glöckner FO (2013) The SILVA ribosomal RNA gene database project: improved data processing and web-based tools. Nucl. Acids Res. 41 (D1): D590-D596.
+- **SILVA DATABASE**: Yilmaz P, Parfrey LW, Yarza P, Gerken J, Pruesse E, Quast C, Schweer T, Peplies J, Ludwig W, Glöckner FO (2014) The SILVA and "All-species Living Tree Project (LTP)" taxonomic frameworks. Nucl. Acids Res. 42:D643-D648
+- CBS database**: "Strains were obtained from the Westerdijk Fungal Biodiversity Institute (CBS-KNAW), Utrecht, The Netherlands."
 
 ---
 
@@ -44,5 +47,3 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 | Version | Highlights |
 |---------|-----------|
 | v2.6 | Windows Docker mode, performance profiling, GUI splash screen & tray icon |
-| v2.x | DuckDB OTU aggregation, interactive HTML reports, PyQt5 GUI, multi-format DB |
-| v1.x | Initial release — basic filtering and mapping |
