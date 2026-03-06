@@ -17,16 +17,18 @@ A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technolog
 
 ## System Requirements
 
-### Software Dependencies
+### Software Dependencies 
 
+** Linux/MacOS**
 **External Tools** (must be installed separately):
 - [minimap2](https://github.com/lh3/minimap2) >= 2.17
 - [samtools](http://www.htslib.org/) >= 1.10
 - awk (pre-installed on most Unix systems)
 
-> **Windows users**: external tools are not required — they run automatically inside the Docker container. See the [Windows section](#windows-docker-mode) below.
-
-**Python** >= 3.8
+> **Windows users**: 
+- [python](https://www.python.org/downloads/) >= 3.8
+- [docker](https://www.docker.com/products/docker-desktop)
+- the other tools run automatically inside the Docker container. See the [Windows section](#windows-docker-mode) below.
 
 ### Python Dependencies
 
@@ -71,7 +73,7 @@ pip install -r requirements.txt
 
 ## Windows — Docker Mode
 
-On Windows, LOREON runs entirely via Docker: minimap2, samtools and the pipeline execute inside a Linux container, while the GUI runs natively on the host.
+On Windows, LOREON runs in mixed mode: minimap2, samtools and the pipeline execute inside a docker container, while the GUI runs natively on the host.
 
 ### Prerequisites
 
@@ -80,21 +82,15 @@ On Windows, LOREON runs entirely via Docker: minimap2, samtools and the pipeline
 
 ### Quick Start — Standalone Executable
 
-The easiest way to run LOREON on Windows is the pre-built executable:
+The easiest way to run LOREON on Windows is to run the installer. The installer will create a shortcut to the pre-built executable:
 
-1. Download or build `dist/LOREON/LOREON.exe` (see [Building the executable](#building-the-executable))
-2. Double-click `LOREON.exe`
-3. In the GUI, check **Use Docker** and click **Build Image** (first run only)
-4. Select input folder, database file and output folder
-5. Click **START PIPELINE**
+1. Download or build `windows_setupv/LOREON_Setup_2.6.exe` 
+2. The installer will check for required dependencies and install them if missing
+3. Double-click `LOREON_Setup_2.6.exe`
+4. Open the loreon GUI, check **Use Docker** and click **Build Image** (first run only)
+5. Select input folder, database file and output folder
+6. Click **START PIPELINE**
 
-Default data directories (created automatically on first run):
-
-| Purpose | Host path | Container path |
-|---------|-----------|----------------|
-| Input FASTQ | `%USERPROFILE%\Documents\loreon\data` | `/data/input` |
-| Results | `%USERPROFILE%\Documents\loreon\results` | `/data/output` |
-| Database | `%USERPROFILE%\Documents\loreon\db` | `/data/db` |
 
 ### Building the Executable
 
@@ -108,25 +104,7 @@ The script:
 3. Builds `dist/LOREON/LOREON.exe` with the icon embedded
 4. Copies all Docker context files into `dist/LOREON/`
 
-### GUI Features (Windows)
 
-| Feature | Description |
-|---------|-------------|
-| Splash screen | Logo displayed at startup |
-| Title bar icon | Application icon in window chrome and taskbar |
-| System tray icon | Right-click for *Mostra / Esci*; double-click to restore |
-| Build Image | Builds the Docker image from inside the GUI |
-| Check Image | Verifies that `loreon:latest` is available |
-
-### Command-Line (bash / Git Bash)
-
-```bash
-./run_loreon.sh -d database.fasta -f unite
-```
-
-`run_loreon.sh` creates the data directories automatically and launches the container with the correct volume mounts.
-
----
 
 ## Usage
 
@@ -145,6 +123,8 @@ The GUI provides:
    - minimap2 parameters (k-mer, window size)
 3. **Real-time Logging**: Progress tracking with status bar
 4. **Automatic Report**: Opens HTML report upon completion
+5. **Performance Profiling**: To profile the pipeline performace
+6. **Debug Mode**: To enable verbose debug output
 
 ### Command-Line Mode
 
@@ -456,7 +436,7 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 ## Authors
 
 - Roberto Scarponi - University of Perugia
-- Developed in collaboration with the Microbiology Laboratory
+- Developed in collaboration with the Microbiology Laboratory, department of Biotechnology, University of Perugia
 - Based on research by Angela Conti, Gianluigi Cardinali, and colleagues
 
 ## Contact
@@ -469,25 +449,3 @@ For bug reports and feature requests, please open an issue on GitHub.
 - UNITE database: Abarenkov et al. (2024). UNITE: a database providing web-based methods for the molecular identification of ectomycorrhizal fungi.
 - DuckDB: High-performance analytical database system
 - Plotly: Interactive visualization library
-
-## Version History
-
-### v2.6 (Current)
-- Merge-by-directory filtering
-- Natural barcode sorting
-- Force taxonomy map recreation option
-- Improved GUI with persistent worker thread
-- Enhanced error handling
-- **Windows Docker mode**: standalone executable, Docker volume mounts, `run_loreon.sh`
-- **GUI enhancements**: splash screen, window/taskbar/tray icon, Build Image dialog
-- **Performance profiling**: `--profile` flag, `PipelineProfiler` class, JSON + Word report output
-
-### v2.x
-- DuckDB-based OTU aggregation
-- Interactive HTML reports
-- PyQt5 GUI interface
-- Multi-format database support
-
-### v1.x
-- Initial release
-- Basic filtering and mapping
