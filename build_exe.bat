@@ -51,6 +51,8 @@ copy Dockerfile dist\LOREON\
 copy requirements.txt dist\LOREON\
 if exist .dockerignore copy .dockerignore dist\LOREON\
 copy loreon_app_icon_2.png dist\LOREON\
+copy loreon.jpeg dist\LOREON\
+copy credits.md dist\LOREON\
 copy metaGenomics_new.py dist\LOREON\
 copy OtuUtils.py dist\LOREON\
 copy ResultsReader.py dist\LOREON\

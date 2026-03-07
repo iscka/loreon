@@ -267,6 +267,9 @@ class MainWindow(QMainWindow):
         docker_layout = QHBoxLayout()
 
         self.docker_check = QCheckBox("Use Docker  (minimap2 + samtools run inside container)")
+        if sys.platform == 'win32':
+            self.docker_check.setChecked(True)
+            self.docker_check.setToolTip("Docker is required on Windows and cannot be disabled.")
         docker_layout.addWidget(self.docker_check)
 
         self.docker_status_label = QLabel("Status: unknown")
@@ -418,6 +421,10 @@ class MainWindow(QMainWindow):
             return
 
         use_docker = self.docker_check.isChecked()
+        if sys.platform == 'win32' and not use_docker:
+            QMessageBox.critical(self, "Docker required",
+                                 "Docker must be enabled on Windows, please enable it.")
+            return
         if use_docker and not self._docker_available():
             QMessageBox.critical(self, "Docker not found",
                                  "Docker mode is enabled but Docker is not in PATH.\n"
