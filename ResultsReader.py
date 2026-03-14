@@ -37,75 +37,119 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str):
         "'" + f.replace("'", "''") + "'" for f in clean_files
     ) + "]"
 
-    sql_query = f"""
-    WITH all_data AS (
-        SELECT
-            replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
-            otu_id, mapped_count
-        FROM read_csv(
-            {clean_files_sql}, delim='\t', header=False,
-            columns={col_types_sql}, filename=True
-        )
-        WHERE otu_id != '*'
-    )
-    PIVOT ( SELECT * FROM all_data )
-    ON sample_name
-    USING sum(mapped_count)
-    GROUP BY otu_id;
-    """
+    # --- OPT-5: Taxonomy join inside DuckDB ---
+    # When a taxonomy file is available, perform the join inside DuckDB
+    # before materializing the Python DataFrame — avoids loading the
+    # full taxonomy TSV (500k+ rows for SILVA) into pandas.
+    tax_path = Path(taxonomy_file) if taxonomy_file else None
+    has_tax = tax_path and tax_path.exists()
 
-    counts_df = pd.DataFrame()
+    if has_tax:
+        tax_path_sql = str(tax_path).replace("'", "''")
+        sql_query = f"""
+        WITH counts AS (
+            SELECT * FROM (
+                PIVOT (
+                    SELECT
+                        replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
+                        otu_id, mapped_count
+                    FROM read_csv(
+                        {clean_files_sql}, delim='\\t', header=False,
+                        columns={col_types_sql}, filename=True
+                    )
+                    WHERE otu_id != '*'
+                )
+                ON sample_name
+                USING sum(mapped_count)
+                GROUP BY otu_id
+            )
+        ),
+        taxonomy AS (
+            SELECT * FROM read_csv(
+                '{tax_path_sql}', delim='\\t', header=True,
+                columns={{'OTU_ID': 'VARCHAR', 'Taxonomy': 'VARCHAR'}}
+            )
+        )
+        SELECT t.OTU_ID, t.Taxonomy, c.*
+        FROM taxonomy t
+        INNER JOIN counts c ON t.OTU_ID = c.otu_id;
+        """
+    else:
+        sql_query = f"""
+        PIVOT (
+            SELECT
+                replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
+                otu_id, mapped_count
+            FROM read_csv(
+                {clean_files_sql}, delim='\\t', header=False,
+                columns={col_types_sql}, filename=True
+            )
+            WHERE otu_id != '*'
+        )
+        ON sample_name
+        USING sum(mapped_count)
+        GROUP BY otu_id;
+        """
+
+    final_df = pd.DataFrame()
     try:
         con = duckdb.connect()
-        counts_df = con.execute(sql_query).df()
+        final_df = con.execute(sql_query).df()
         con.close()
 
-        if counts_df.empty:
-            print("No valid OTU data found (only unmapped?).")
+        if final_df.empty:
+            print("WARNING: No valid OTU data found (all reads may have been "
+                  "removed by the quality filter). Creating empty OTU table.")
+            empty_df = pd.DataFrame(columns=['Taxonomy'])
+            empty_df.index.name = 'OTU_ID'
+            try:
+                empty_df.to_excel(output_path, engine='openpyxl')
+                print(f"Empty OTU table saved to: {output_path}")
+            except Exception as e:
+                print(f"Error saving empty OTU table: {e}")
             return
 
-        counts_df = counts_df.set_index('otu_id').fillna(0).astype(int)
+        if has_tax:
+            # DuckDB join returns: OTU_ID, Taxonomy, otu_id, sample1, sample2, ...
+            # Drop the duplicate otu_id column from the counts side
+            if 'otu_id' in final_df.columns:
+                final_df = final_df.drop(columns=['otu_id'])
+            final_df = final_df.set_index('OTU_ID')
+        else:
+            final_df = final_df.set_index('otu_id')
+            final_df.index.name = 'OTU_ID'
 
+        # fillna + astype in-place where possible
+        final_df = final_df.fillna(0)
+        # Convert only numeric columns to int (skip 'Taxonomy' if present)
+        num_cols = final_df.select_dtypes(include='number').columns
+        final_df[num_cols] = final_df[num_cols].astype(int)
+
+        # Natural-sort sample columns
         print("Applying natural sort to sample columns (barcode01, barcode02, ...)...")
-        sample_columns = counts_df.columns.tolist()
+        tax_cols = ['Taxonomy'] if 'Taxonomy' in final_df.columns else []
+        sample_columns = [c for c in final_df.columns if c not in tax_cols]
         sorted_sample_columns = sorted(sample_columns, key=natural_sort_key)
-        counts_df = counts_df[sorted_sample_columns]
+        final_df = final_df[tax_cols + sorted_sample_columns]
 
     except Exception as e:
         print(f"CRITICAL ERROR during DuckDB count aggregation: {e}")
         return
 
-    tax_df = None
-    if taxonomy_file:
-        tax_path = Path(taxonomy_file)
-        print(f"Loading taxonomy file: {tax_path.name}")
-        try:
-            if not tax_path.exists():
-                print(f"WARNING: Taxonomy file not found: {tax_path}")
-            else:
-                tax_df = pd.read_csv(tax_path, sep='\t', index_col=0)
-                tax_df.index.name = "OTU_ID"
-                print("Taxonomy file loaded successfully.")
-        except Exception as e:
-            print(f"WARNING: Cannot read taxonomy file {tax_path}: {e}")
-    else:
-        print("No taxonomy file provided. Output will contain counts only.")
-
-    if tax_df is not None:
-        print("Joining taxonomy with counts (inner join)...")
-        final_table_df = tax_df.join(counts_df, how='inner')
-    else:
-        final_table_df = counts_df
-        final_table_df.index.name = "OTU_ID"
-
+    # --- OPT-3: xlsxwriter is 5-15x faster than openpyxl for write-only ---
     print(f"Saving final table to {output_path}...")
     try:
-        final_table_df.to_excel(output_path, engine='openpyxl')
+        final_df.to_excel(output_path, engine='xlsxwriter')
         print(f"Final OTU table (with taxonomy) saved to: {output_path}")
     except ImportError:
-        print("Module 'openpyxl' not found. Saving as CSV.")
-        csv_output = output_path.with_suffix('.csv')
-        final_table_df.to_csv(csv_output)
-        print(f"Final OTU table saved to: {csv_output}")
+        # Fall back to openpyxl if xlsxwriter not installed
+        try:
+            final_df.to_excel(output_path, engine='openpyxl')
+            print(f"Final OTU table saved to: {output_path} (using openpyxl fallback)")
+        except ImportError:
+            print("Neither 'xlsxwriter' nor 'openpyxl' found. Saving as CSV.")
+            csv_output = output_path.with_suffix('.csv')
+            final_df.to_csv(csv_output)
+            print(f"Final OTU table saved to: {csv_output}")
     except Exception as e:
         print(f"Error saving final file {output_path}: {e}")

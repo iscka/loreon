@@ -71,7 +71,80 @@
             </div>
         </div>
 
-        <h2>Section 1: Filter QC Analysis</h2>
+        {% if mapping_kpis %}
+        <h2>Section 1: Mapping QC Report</h2>
+
+        <div class="row">
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ mapping_kpis.total_reads }}</div>
+                    <div class="kpi-label">Total Input Reads</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-primary">{{ mapping_kpis.mapped_reads }}</div>
+                    <div class="kpi-label">Mapped Reads</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value {% if mapping_kpis.mapping_rate | float > 80 %}text-success{% else %}text-warning{% endif %}">{{ mapping_kpis.mapping_rate }}</div>
+                    <div class="kpi-label">Mapping Rate</div>
+                </div></div>
+            </div>
+            {% if mapping_kpis.quality_filter_active %}
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-success">{{ mapping_kpis.reads_after_quality_filter }}</div>
+                    <div class="kpi-label">Reads After Quality Filter</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ mapping_kpis.quality_retention }}</div>
+                    <div class="kpi-label">Quality Retention Rate</div>
+                </div></div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if mapping_kpis.quality_filter_active %}
+        <div class="alert alert-info mt-2" role="alert">
+            <strong>Alignment Quality Filters applied:</strong>
+            {% if mapping_kpis.min_percent_identity > 0 %}
+            Min Identity: <strong>{{ mapping_kpis.min_percent_identity }}%</strong>
+            {% endif %}
+            {% if mapping_kpis.min_ref_coverage > 0 %}
+            &nbsp;|&nbsp; Min Ref Coverage: <strong>{{ mapping_kpis.min_ref_coverage }}%</strong>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_mapping_div | safe }}
+            </div>
+        </div>
+
+        {% if graph_quality_div %}
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_quality_div | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+        <h3>Mapping Details per Sample</h3>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_mapping_html | safe }}
+            </div>
+        </div>
+
+        {% endif %}
+
+        <h2>Section {% if mapping_kpis %}2{% else %}1{% endif %}: Filter QC Analysis</h2>
         <div class="card shadow-sm">
             <div class="card-body">
                 {{ graph_filter_counts_div | safe }}
@@ -90,8 +163,9 @@
             </div>
         </div>
 
-        <h2>Section 2: Metagenomic Analysis</h2>
+        <h2>Section {% if mapping_kpis %}3{% else %}2{% endif %}: Metagenomic Analysis</h2>
 
+        {% if kpis.has_otu_data %}
         <div class="card shadow-sm">
             <div class="card-header">
                 <div class="row align-items-center">
@@ -125,6 +199,16 @@
                 {{ table_otu_html | safe }}
             </div>
         </div>
+        {% else %}
+        <div class="alert alert-warning mt-3" role="alert">
+            <h5 class="alert-heading">No OTU data available</h5>
+            <p class="mb-0">
+                The alignment quality filter removed all mapped reads, so no OTU table could be generated.
+                Consider lowering or disabling (set to 0) the <strong>Min Percent Identity</strong> and/or
+                <strong>Min Reference Coverage</strong> thresholds and re-running the analysis.
+            </p>
+        </div>
+        {% endif %}
 
     </div> <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
@@ -136,6 +220,7 @@
 
         // --- Function to draw/update the graph ---
         function updateCompositionGraph(rank) {
+            if (!allGraphData) return;
             const filteredData = allGraphData.filter(d => d.Rank === rank);
             const groups = [...new Set(filteredData.map(d => d.Taxonomy))];
 
@@ -151,9 +236,9 @@
 
             const layout = {
                 title: `Taxonomic Composition by ${rank}`,
-                barmode: 'stack', // Stacked bar chart
+                barmode: 'stack',
                 height: 600,
-                yaxis: { title: 'Relative Abundance (%)' } // Updated axis title
+                yaxis: { title: 'Relative Abundance (%)' }
             };
 
             Plotly.newPlot('composition-graph', traces, layout, {responsive: true});
@@ -162,34 +247,35 @@
         // --- Activators (when the page is ready) ---
         $(document).ready(function() {
 
-            // 1. Activate the Searchable OTU Table
-            $('#otu-table').DataTable({
-                paging: true, pageLength: 10,
-                lengthMenu: [10, 25, 50, 100],
-                ordering: true, searching: true,
-                // --- TRANSLATION FOR DATATABLES ---
-                language: {
-                    search: "Search table:",
-                    lengthMenu: "Show _MENU_ entries",
-                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
-                    paginate: {
-                        first: "First",
-                        last: "Last",
-                        next: "Next",
-                        previous: "Previous"
+            // 1. Activate the Searchable OTU Table (only if it exists)
+            if ($('#otu-table').length) {
+                $('#otu-table').DataTable({
+                    paging: true, pageLength: 10,
+                    lengthMenu: [10, 25, 50, 100],
+                    ordering: true, searching: true,
+                    language: {
+                        search: "Search table:",
+                        lengthMenu: "Show _MENU_ entries",
+                        info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                        paginate: {
+                            first: "First",
+                            last: "Last",
+                            next: "Next",
+                            previous: "Previous"
+                        }
                     }
-                }
+                });
+            }
 
-            });
-
-            // 2. Activate the dropdown menu
+            // 2. Activate the dropdown menu (only if composition data exists)
             const rankSelector = document.getElementById('rank-selector');
-            rankSelector.addEventListener('change', (e) => {
-                updateCompositionGraph(e.target.value);
-            });
-
-            // 3. Draw the initial graph (Family)
-            updateCompositionGraph('Family');
+            if (rankSelector && allGraphData) {
+                rankSelector.addEventListener('change', (e) => {
+                    updateCompositionGraph(e.target.value);
+                });
+                // 3. Draw the initial graph (Family)
+                updateCompositionGraph('Family');
+            }
         });
     </script>
 

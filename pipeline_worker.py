@@ -1,5 +1,7 @@
 import subprocess
 import sys
+import os
+import signal
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
@@ -38,7 +40,7 @@ class PipelineWorker(QObject):
                 self.is_running = False
                 return
 
-            self.progress_signal.emit(95, "Step 4: HTML Report generation...")
+            self.progress_signal.emit(95, "Step 7: HTML Report generation...")
 
             cmd_report = self._build_docker_report_cmd() if use_docker else self._build_native_report_cmd()
             success_report = self.run_process(cmd_report)
@@ -81,10 +83,14 @@ class PipelineWorker(QObject):
         else:
             self.log_signal.emit("[INFO] Length filter disabled.")
             cmd.extend(["-min", "0", "-max", "999999"])
+        cmd.extend(["--min-percent-identity", str(self.settings.get("min_percent_identity", 95.0))])
+        cmd.extend(["--min-ref-coverage", str(self.settings.get("min_ref_coverage", 90.0))])
         if self.settings.get("force_tax_map", False):
             cmd.append("--force-tax-map")
         if self.settings.get("profile", False):
             cmd.append("--profile")
+        if self.settings.get("delete_bam", False):
+            cmd.append("--delete-bam")
         return cmd
 
     def _report_names(self):
@@ -97,9 +103,11 @@ class PipelineWorker(QObject):
         min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
         max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
         return {
-            "filter_report": f"report_filtering_{min_len}_{max_len}.xlsx",
+            # OPT-7: pipeline now writes TSV; report_generator auto-detects both
+            "filter_report": f"report_filtering_{min_len}_{max_len}.tsv",
             "otu_table": f"OTU_Table_{analysis_name}_{db_name}.xlsx",
             "html_report": f"Report_{analysis_name}_{db_name}.html",
+            "mapping_stats": "mapping_stats.json",
             "project_title": f"Report: {analysis_name} (DB: {db_name})",
         }
 
@@ -109,7 +117,8 @@ class PipelineWorker(QObject):
 
     def _build_native_pipeline_cmd(self):
         script_path = str(Path(__file__).parent / "metaGenomics_new.py")
-        return [sys.executable, script_path] + self._pipeline_args(
+        # -u: force unbuffered stdout/stderr so log lines appear in real time
+        return [sys.executable, "-u", script_path] + self._pipeline_args(
             self.settings["input_dir"],
             self.settings["output_dir"],
             self.settings["db_path"],
@@ -119,13 +128,17 @@ class PipelineWorker(QObject):
         script_path = str(Path(__file__).parent / "report_generator.py")
         output_dir = Path(self.settings["output_dir"])
         names = self._report_names()
-        return [
-            sys.executable, script_path,
+        mapping_stats_path = output_dir / names["mapping_stats"]
+        cmd = [
+            sys.executable, "-u", script_path,
             "-f", str(output_dir / names["filter_report"]),
             "-otu", str(output_dir / names["otu_table"]),
             "-o", str(output_dir / names["html_report"]),
             "-pn", names["project_title"],
         ]
+        if mapping_stats_path.exists():
+            cmd.extend(["-ms", str(mapping_stats_path)])
+        return cmd
 
     def _docker_base_cmd(self):
         input_dir = Path(self.settings["input_dir"])
@@ -150,15 +163,20 @@ class PipelineWorker(QObject):
 
     def _build_docker_report_cmd(self):
         names = self._report_names()
-        return self._docker_base_cmd() + [
+        output_dir = Path(self.settings["output_dir"])
+        mapping_stats_path = output_dir / names["mapping_stats"]
+        cmd = self._docker_base_cmd() + [
             "python3", "/app/report_generator.py",
             "-f", f"/data/output/{names['filter_report']}",
             "-otu", f"/data/output/{names['otu_table']}",
             "-o", f"/data/output/{names['html_report']}",
             "-pn", names["project_title"],
         ]
+        if mapping_stats_path.exists():
+            cmd.extend(["-ms", f"/data/output/{names['mapping_stats']}"])
+        return cmd
 
-    # --- Process execution (unchanged) ---
+    # --- Process execution ---
 
     def run_process(self, command_list):
         if not self.is_running:
@@ -168,9 +186,14 @@ class PipelineWorker(QObject):
             self.log_signal.emit(f"[DEBUG] Command: {cmd_str}")
         local_return_code = -1
         try:
+            popen_kwargs = {}
+            if sys.platform != 'win32':
+                popen_kwargs['start_new_session'] = True
+
             self.process = subprocess.Popen(
                 command_list, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                text=True, encoding='utf-8', errors='replace', bufsize=1
+                text=True, encoding='utf-8', errors='replace', bufsize=1,
+                **popen_kwargs
             )
             with self.process.stdout:
                 for line in iter(self.process.stdout.readline, ''):
@@ -180,12 +203,9 @@ class PipelineWorker(QObject):
                         self.update_progress_from_log(line)
                     if not self.is_running:
                         break
-            try:
-                self.process.wait(timeout=600)
-            except subprocess.TimeoutExpired:
-                self.log_signal.emit("[WARNING] Process timed out after 600 seconds. Terminating.")
-                self.process.terminate()
-                self.process.wait()
+            # OPT-15: no timeout — stdout loop already blocks until process
+            # closes its pipe; a timeout here would kill long-running jobs
+            self.process.wait()
             local_return_code = self.process.returncode
         except Exception as e:
             self.log_signal.emit(f"[SUBPROCESS Error] {e}")
@@ -198,30 +218,44 @@ class PipelineWorker(QObject):
             return False
         return local_return_code == 0
 
+    # Step names updated to integer numbering
     def update_progress_from_log(self, line):
-        if "--- Step 0:" in line:
-            self.progress_signal.emit(5, "Step 0: Parsing Taxonomy...")
-        elif "--- Step 1:" in line:
-            self.progress_signal.emit(10, "Step 1: Filter...")
-        elif "--- Step 1.5:" in line:
-            self.progress_signal.emit(40, "Step 1.5: Filter Report...")
-        elif "--- Step 2:" in line:
-            self.progress_signal.emit(50, "Step 2: Mapping/Tabeling...")
-        elif "--- Step 2.5:" in line:
-            self.progress_signal.emit(85, "Step 2.5: Reformatting...")
-        elif "--- Step 3:" in line:
-            self.progress_signal.emit(90, "Step 3: OTU Aggregation...")
+        if "STEP 1:" in line:
+            self.progress_signal.emit(5, "Step 1: Parsing Taxonomy...")
+        elif "STEP 2:" in line:
+            self.progress_signal.emit(10, "Step 2: Filter...")
+        elif "STEP 3:" in line:
+            self.progress_signal.emit(40, "Step 3: Filter Report...")
+        elif "STEP 4:" in line:
+            self.progress_signal.emit(50, "Step 4: Mapping/Tabeling...")
+        elif "STEP 5:" in line:
+            self.progress_signal.emit(85, "Step 5: Reformatting...")
+        elif "STEP 6:" in line:
+            self.progress_signal.emit(90, "Step 6: OTU Aggregation...")
 
     @pyqtSlot()
     def stop(self):
         if self.is_running:
             self.is_running = False
             if self.process:
-                self.log_signal.emit("--- SENDING SIGTERM SIGNAL ---")
+                self.log_signal.emit("--- STOPPING PIPELINE (killing process tree) ---")
                 try:
-                    self.process.terminate()
+                    if sys.platform == 'win32':
+                        subprocess.run(
+                            ['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
+                            capture_output=True
+                        )
+                    else:
+                        os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+                except OSError:
+                    try:
+                        self.process.terminate()
+                    except Exception:
+                        pass
                 except Exception as e:
-                    self.log_signal.emit(f"Error during sigterm: {e}")
+                    self.log_signal.emit(f"Error during stop: {e}")
             else:
                 self.log_signal.emit("--- Request Interrupt (no process active) ---")
         else:

@@ -4,12 +4,13 @@ import shutil
 import subprocess
 import sys
 import multiprocessing
+from datetime import datetime
 from pathlib import Path
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
     QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
-    QFileDialog, QSpinBox, QDialog, QDialogButtonBox,
+    QFileDialog, QSpinBox, QDoubleSpinBox, QDialog, QDialogButtonBox,
     QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy, QTextBrowser
 )
 from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop, QSize
@@ -82,12 +83,13 @@ class DockerBuildDialog(QDialog):
 
 
 class _ScaledPixmapLabel(QLabel):
-    """QLabel that fills the full width, adjusts height to preserve aspect ratio, and is clickable."""
+    """QLabel that fills the full width up to an optional max_height, and is clickable."""
     clicked = pyqtSignal()
 
-    def __init__(self, pixmap, parent=None):
+    def __init__(self, pixmap, max_height=120, parent=None):
         super().__init__(parent)
         self._src = pixmap
+        self._max_height = max_height
         self.setAlignment(Qt.AlignCenter)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
         self.setCursor(Qt.PointingHandCursor)
@@ -98,13 +100,20 @@ class _ScaledPixmapLabel(QLabel):
     def heightForWidth(self, width):
         if self._src.isNull() or self._src.width() == 0:
             return 0
-        return int(self._src.height() * width / self._src.width())
+        natural = int(self._src.height() * width / self._src.width())
+        return min(natural, self._max_height)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        if not self._src.isNull():
-            scaled = self._src.scaledToWidth(self.width(), Qt.SmoothTransformation)
-            super().setPixmap(scaled)
+        if self._src.isNull():
+            return
+        available_h = self.heightForWidth(self.width())
+        # Scale to fit within (width × max_height), preserving aspect ratio
+        scaled = self._src.scaled(
+            self.width(), available_h,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation
+        )
+        super().setPixmap(scaled)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
@@ -148,6 +157,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("LOREON Metagenomic Pipeline (OTU Gen v3.3 GUI)")
         self.setGeometry(100, 100, 900, 750)
         self.is_running = False
+        self._log_file = None
         icon = _load_icon()
         self.setWindowIcon(icon)
         self.init_ui()
@@ -162,7 +172,7 @@ class MainWindow(QMainWindow):
         # --- Logo banner (edge-to-edge, clickable) ---
         logo_path = _get_base_dir() / 'loreon.jpeg'
         if logo_path.exists():
-            logo_label = _ScaledPixmapLabel(QPixmap(str(logo_path)))
+            logo_label = _ScaledPixmapLabel(QPixmap(str(logo_path)), max_height=120)
             logo_label.clicked.connect(self._show_credits)
             outer_layout.addWidget(logo_label)
         # --- End logo banner ---
@@ -217,9 +227,15 @@ class MainWindow(QMainWindow):
             "CPU time, memory and domain metrics for each pipeline step."
         )
         options_left_layout.addWidget(self.profile_check)
+        self.delete_bam_check = QCheckBox("Delete BAM/SAM after analysis")
+        self.delete_bam_check.setToolTip(
+            "Delete intermediate BAM and SAM files after tabeling\n"
+            "to free disk space. The OTU results are NOT affected."
+        )
+        options_left_layout.addWidget(self.delete_bam_check)
         options_layout.addLayout(options_left_layout)
 
-        filter_box = QGroupBox("Length Filter")
+        filter_box = QGroupBox("Read & Alignment Filter")
         filter_layout = QGridLayout()
         self.filter_check = QCheckBox("Enable Length Filter")
         self.filter_check.setChecked(True)
@@ -229,11 +245,33 @@ class MainWindow(QMainWindow):
         self.max_len_input = QSpinBox()
         self.max_len_input.setRange(0, 99999)
         self.max_len_input.setValue(300)
+        self.min_identity_input = QDoubleSpinBox()
+        self.min_identity_input.setRange(0.0, 100.0)
+        self.min_identity_input.setSingleStep(0.5)
+        self.min_identity_input.setDecimals(1)
+        self.min_identity_input.setValue(95.0)
+        self.min_identity_input.setToolTip(
+            "Minimum percent identity for mapped reads (0 = disabled).\n"
+            "E.g. 97.0 keeps only alignments with ≥97% identity."
+        )
+        self.min_ref_cov_input = QDoubleSpinBox()
+        self.min_ref_cov_input.setRange(0.0, 100.0)
+        self.min_ref_cov_input.setSingleStep(1.0)
+        self.min_ref_cov_input.setDecimals(1)
+        self.min_ref_cov_input.setValue(90.0)
+        self.min_ref_cov_input.setToolTip(
+            "Minimum reference coverage for mapped reads (0 = disabled).\n"
+            "E.g. 80.0 keeps only alignments covering ≥80% of the reference."
+        )
         filter_layout.addWidget(self.filter_check, 0, 0, 1, 2)
         filter_layout.addWidget(QLabel("Min Len:"), 1, 0)
         filter_layout.addWidget(self.min_len_input, 1, 1)
         filter_layout.addWidget(QLabel("Max Len:"), 2, 0)
         filter_layout.addWidget(self.max_len_input, 2, 1)
+        filter_layout.addWidget(QLabel("Min Identity (%):"), 3, 0)
+        filter_layout.addWidget(self.min_identity_input, 3, 1)
+        filter_layout.addWidget(QLabel("Min Ref Cov (%):"), 4, 0)
+        filter_layout.addWidget(self.min_ref_cov_input, 4, 1)
         filter_box.setLayout(filter_layout)
         options_layout.addWidget(filter_box)
 
@@ -362,8 +400,16 @@ class MainWindow(QMainWindow):
         self.max_len_input.setEnabled(is_enabled)
 
     def append_log(self, text):
-        self.log_output.appendPlainText(text)
-        self.log_output.verticalScrollBar().setValue(self.log_output.verticalScrollBar().maximum())
+        stamped = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
+        # OPT-13: appendPlainText auto-scrolls when cursor is at bottom;
+        # explicit setValue(maximum()) was redundant and caused GUI lag
+        self.log_output.appendPlainText(stamped)
+        if self._log_file and not self._log_file.closed:
+            try:
+                self._log_file.write(stamped + "\n")
+                self._log_file.flush()
+            except Exception:
+                pass
 
     def update_progress(self, percentage, text):
         self.status_bar.setValue(percentage)
@@ -432,6 +478,15 @@ class MainWindow(QMainWindow):
             return
 
         self.log_output.clear()
+
+        # Open log file in the output directory
+        try:
+            log_path = Path(self.output_dir_label.text()) / "pipeline.log"
+            self._log_file = open(log_path, "w", encoding="utf-8")
+        except Exception as e:
+            self._log_file = None
+            self.log_output.appendPlainText(f"[WARNING] Cannot create pipeline.log: {e}")
+
         self.append_log("--- STARTING PIPELINE ---")
         if use_docker:
             self.append_log(f"[INFO] Docker mode: pipeline will run inside '{DOCKER_IMAGE}'")
@@ -445,6 +500,8 @@ class MainWindow(QMainWindow):
             "enable_filter": self.filter_check.isChecked(),
             "min_len": self.min_len_input.value(),
             "max_len": self.max_len_input.value(),
+            "min_percent_identity": self.min_identity_input.value(),
+            "min_ref_coverage": self.min_ref_cov_input.value(),
             "total_threads": self.total_threads_input.value(),
             "threads_per_job": self.job_threads_input.value(),
             "kmer_size": self.kmer_input.value(),
@@ -452,6 +509,7 @@ class MainWindow(QMainWindow):
             "open_report": self.open_report_check.isChecked(),
             "force_tax_map": self.force_tax_map_check.isChecked(),
             "profile": self.profile_check.isChecked(),
+            "delete_bam": self.delete_bam_check.isChecked(),
             "use_docker": use_docker,
         }
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
@@ -474,6 +532,15 @@ class MainWindow(QMainWindow):
 
     def pipeline_finished(self, success, html_report_path):
         self.append_log("--- PIPELINE FINISHED ---")
+
+        # Close log file
+        if self._log_file and not self._log_file.closed:
+            try:
+                self._log_file.close()
+            except Exception:
+                pass
+            self._log_file = None
+
         self.set_running_state(False)
         if success:
             self.status_bar.setFormat("Completed successfully!")
@@ -504,9 +571,11 @@ class MainWindow(QMainWindow):
                        self.db_label, self.output_dir_btn, self.output_dir_label,
                        self.format_combo, self.debug_check,
                        self.open_report_check, self.filter_check, self.min_len_input,
-                       self.max_len_input, self.total_threads_input,
+                       self.max_len_input, self.min_identity_input, self.min_ref_cov_input,
+                       self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
-                       self.force_tax_map_check, self.profile_check, self.docker_check,
+                       self.force_tax_map_check, self.profile_check,
+                       self.delete_bam_check, self.docker_check,
                        self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
 

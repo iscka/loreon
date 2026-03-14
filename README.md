@@ -5,10 +5,11 @@ A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technolog
 ## Features
 
 - **Sequence Quality Filtering**: Length-based filtering with configurable min/max thresholds
+- **Alignment Quality Filtering**: Post-mapping filters on percent identity and reference coverage applied directly via `samtools view -e`
 - **High-Performance Mapping**: Utilizes minimap2 for fast and accurate sequence alignment
 - **Parallel Processing**: Multi-threaded execution for filtering, mapping, and analysis
 - **OTU Table Generation**: Automated OTU (Operational Taxonomic Unit) aggregation with DuckDB
-- **Interactive Reports**: HTML reports with Plotly visualizations
+- **Interactive Reports**: HTML reports with Plotly visualizations, including a dedicated **Mapping QC** section
 - **Multiple Database Formats**: Support for UNITE, SILVA, CBS, Eukariome, and custom formats
 - **GUI Interface**: User-friendly PyQt5 graphical interface with splash screen and system tray icon
 - **Taxonomy Mapping**: Intelligent caching system for taxonomic information
@@ -118,12 +119,15 @@ The GUI provides:
 1. **Path Selection**: Input folder, reference database, output folder
 2. **Parameters Configuration**:
    - Database format (UNITE, SILVA, CBS, etc.)
-   - Length filter (min/max)
+   - **Read & Alignment Filter** group:
+     - Length filter (min/max bp)
+     - Min Identity (%) — minimum alignment percent identity (default: **95.0%**)
+     - Min Ref Cov (%) — minimum reference coverage (default: **90.0%**)
    - Threading options
    - minimap2 parameters (k-mer, window size)
 3. **Real-time Logging**: Progress tracking with status bar
-4. **Automatic Report**: Opens HTML report upon completion
-5. **Performance Profiling**: To profile the pipeline performace
+4. **Automatic Report**: Opens HTML report upon completion (includes Mapping QC section)
+5. **Performance Profiling**: To profile the pipeline performance
 6. **Debug Mode**: To enable verbose debug output
 
 ### Command-Line Mode
@@ -136,6 +140,8 @@ python metaGenomics_new.py \
   -f unite \
   -min 200 \
   -max 300 \
+  --min-percent-identity 95 \
+  --min-ref-coverage 90 \
   -T 8 \
   -t 2 \
   -k 15 \
@@ -150,9 +156,15 @@ python metaGenomics_new.py \
 
 #### Optional Arguments
 
-**Filter Parameters:**
+**Length Filter Parameters:**
 - `-min, --min_len`: Minimum sequence length (default: 200)
 - `-max, --max_len`: Maximum sequence length (default: 300)
+
+**Alignment Quality Filters:**
+- `--min-percent-identity PCT`: Minimum alignment percent identity to keep a mapped read (default: **95.0**, set to 0 to disable).
+  Formula applied via `samtools view -e`: `(alen - NM) / alen × 100 ≥ PCT`
+- `--min-ref-coverage PCT`: Minimum reference sequence coverage to keep a mapped read (default: **90.0**, set to 0 to disable).
+  Formula applied via `samtools view -e`: `alen / rlen × 100 ≥ PCT`
 
 **Performance:**
 - `-T, --total_threads`: Total CPU threads (default: 8)
@@ -190,9 +202,16 @@ python metaGenomics_new.py \
   - Total sequence counts
 
 ### Step 2: Mapping & Tabeling
-- Maps sequences to reference database using minimap2
-- Filters alignments with samtools
+- Maps sequences to reference database using minimap2 (`map-ont` preset)
+- Converts SAM → sorted BAM (samtools)
+- Collects pre-filter mapping statistics via `samtools flagstat`
+- Applies alignment quality filters via `samtools view -e`:
+  - **Percent Identity**: `(alen - NM) × 100 ≥ min_percent_identity × alen`
+  - **Reference Coverage**: `alen × 100 ≥ min_ref_coverage × rlen`
+  - Flag-based filter: `-F 0x904` (removes unmapped, secondary, supplementary)
+- Collects post-filter mapping statistics
 - Generates count tables per sample
+- Saves per-sample mapping statistics to `mapping_stats.json`
 
 ### Step 2.5: Index Reformatting
 - Reformats OTU IDs based on database format
@@ -205,11 +224,23 @@ python metaGenomics_new.py \
 - Saves final Excel file
 
 ### Step 4: HTML Report Generation
-- Interactive Plotly visualizations
-- Filter statistics (good vs. bad counts, length distributions)
-- Taxonomic composition (Family, Genus, Species)
-- Top 25 OTU heatmap
-- Full OTU table
+
+The HTML report is organised in numbered sections:
+
+**Section 1 — Mapping QC Report** *(generated when `mapping_stats.json` is available)*
+- KPI cards: Total Input Reads, Mapped Reads, Mapping Rate, Reads After Quality Filter, Quality Retention Rate
+- Info badge showing the active quality filter thresholds (identity, reference coverage)
+- Stacked bar chart: **Mapped vs. Unmapped reads** per sample
+- Stacked bar chart: **Quality filter retention** per sample *(shown only when at least one quality filter is active)*
+- Per-sample mapping statistics table
+
+**Section 2 — Filter QC Analysis**
+- Filter statistics: good vs. bad counts, mean/median length per barcode
+
+**Section 3 — Metagenomic Analysis**
+- Taxonomic composition (Family, Genus, Species) — interactive tabs
+- Top 25 OTU heatmap (log-normalised)
+- Full OTU table (searchable)
 
 ## Input Directory Structure
 
@@ -231,12 +262,14 @@ input_data/
 ```
 output_folder/
 ├── mapping/               # SAM files from minimap2
-├── results/               # Per-sample count tables (*.tmp.txt)
-├── filtered/              # Good sequences (merged per barcode)
-├── unfiltered/            # Bad sequences (filtered out)
-├── report_filtering_200_300.xlsx  # Filter statistics
+├── tabeling/              # Sorted/filtered BAM files and intermediate results
+│   └── results/           # Per-sample count tables (*.tmp.txt)
+├── good_seq/              # Good sequences (merged per barcode, post length-filter)
+├── bad_seq/               # Sequences discarded by length filter
+├── report_filtering_200_300.xlsx  # Length filter statistics (Excel)
+├── mapping_stats.json             # Per-sample mapping & alignment quality stats
 ├── OTU_Table_[name]_[db].xlsx     # Final OTU table with taxonomy
-├── Report_[name]_[db].html        # Interactive HTML report
+├── Report_[name]_[db].html        # Interactive HTML report (incl. Mapping QC)
 ├── [db]_taxonomy_map.tsv          # Taxonomy cache
 ├── profile_report.json            # Profiling data (if --profile)
 └── profile_report.docx            # Profiling Word report (if --profile)
@@ -341,14 +374,18 @@ python report_generator.py \
   -f report_filtering_200_300.xlsx \
   -otu OTU_Table_final.xlsx \
   -o MyReport.html \
-  -pn "My Project Name"
+  -pn "My Project Name" \
+  -ms mapping_stats.json
 ```
 
 Arguments:
-- `-f`: Filter report Excel file
-- `-otu`: OTU table Excel file
-- `-o`: Output HTML path
-- `-pn`: Project name for report title
+- `-f, --filter_report`: Length filter report Excel file (required)
+- `-otu, --otu_table`: OTU table Excel file (required)
+- `-o, --output_html`: Output HTML path (required)
+- `-pn, --project_name`: Project name for report title (optional)
+- `-ms, --mapping_stats`: Path to `mapping_stats.json` for the Mapping QC section (optional — section is omitted if not provided)
+
+> The `mapping_stats.json` file is generated automatically by the pipeline in the output folder. Pass it to `report_generator.py` to include the Mapping QC section in reports regenerated manually.
 
 ## Troubleshooting
 
@@ -377,7 +414,19 @@ conda install -c bioconda minimap2
 pip install biopython pandas duckdb openpyxl
 ```
 
-**5. GUI crashes on macOS**
+**5. "Zero reads after quality filter"**
+- The `--min-percent-identity` and `--min-ref-coverage` defaults are 95% and 90% respectively. These are strict thresholds; if your reads are very noisy, lower them (e.g. `--min-percent-identity 85 --min-ref-coverage 70`) or set to `0` to disable entirely.
+- Use `--debug` to see the exact `samtools view -e` expression being applied.
+- The Mapping QC section in the HTML report shows per-sample retention rates, which help diagnose overly aggressive filtering.
+
+**6. "samtools view: expression filter not supported"**
+- The `-e` expression filter requires **samtools ≥ 1.13**. Update samtools:
+  ```bash
+  conda install -c bioconda "samtools>=1.13"
+  ```
+- If you need to use an older samtools version, set both `--min-percent-identity 0` and `--min-ref-coverage 0` to disable the expression-based filter.
+
+**7. GUI crashes on macOS**
 - Install PyQt5: `pip install PyQt5`
 - May need: `brew install python-tk`
 

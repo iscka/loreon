@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import argparse
 import shutil
 import multiprocessing
+import json
+import time
 from pathlib import Path
 from functools import partial
 import pandas as pd
@@ -14,7 +17,7 @@ try:
         mapping_improved,
         tabeling_improved,
         reformat_tmp_indices,
-        _create_tax_map
+        _parse_fasta_headers
     )
     from ResultsReader import makeOtu_duckdb
 except ImportError as e:
@@ -23,7 +26,7 @@ except ImportError as e:
 
 
 def parse_arguments():
-    parser = argparse.ArgumentParser(description="Pipeline v2.6 (Merge by Directory)")
+    parser = argparse.ArgumentParser(description="Pipeline v2.7 (Optimized)")
     io_group = parser.add_argument_group('Input/Output')
     io_group.add_argument(
         "-i", "--input_dir", help="Input directory (containing barcodeXX folders and unclassified).",
@@ -71,6 +74,19 @@ def parse_arguments():
         "-w", "--window_size", help="Minimizer window size.",
         type=int, default=10
     )
+    quality_group = parser.add_argument_group('Alignment Quality Filters')
+    quality_group.add_argument(
+        "--min-percent-identity",
+        help="Minimum percent identity for an alignment to be kept (0 = disabled). "
+             "E.g. 95 means ≥95%% identity.",
+        type=float, default=95.0, metavar="PCT"
+    )
+    quality_group.add_argument(
+        "--min-ref-coverage",
+        help="Minimum reference coverage for an alignment to be kept (0 = disabled). "
+             "E.g. 90 means the alignment must cover ≥90%% of the reference sequence.",
+        type=float, default=90.0, metavar="PCT"
+    )
     other_group = parser.add_argument_group('Other')
     other_group.add_argument(
         "--debug", help="Enable debug output.",
@@ -86,21 +102,26 @@ def parse_arguments():
         help="Enable performance profiling. Saves profile_report.json to the output folder.",
         action="store_true"
     )
+    other_group.add_argument(
+        "--delete-bam",
+        help="Delete BAM and SAM files after tabeling to free disk space.",
+        action="store_true"
+    )
     return parser.parse_args()
 
 
 def check_dependencies():
     print("Checking dependencies...")
-    dependencies = ["minimap2", "samtools", "awk"]
+    dependencies = ["minimap2", "samtools"]
     missing_prog = [dep for dep in dependencies if not shutil.which(dep)]
     if missing_prog:
         print(f"CRITICAL ERROR: Dependencies not found: {', '.join(missing_prog)}")
         sys.exit(1)
     try:
-        import Bio, pandas, openpyxl
+        import pandas
     except ImportError as e:
         print(f"CRITICAL ERROR: Missing Python module: {e.name}")
-        print("conda install biopython pandas openpyxl")
+        print("conda install pandas")
         sys.exit(1)
     print("Dependencies found.")
 
@@ -108,6 +129,9 @@ def check_dependencies():
 def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
     sample_name = fastq_file_path.name
     debug = kwargs.get('debug', False)
+    min_percent_identity = kwargs.pop('min_percent_identity', 0.0)
+    min_ref_coverage = kwargs.pop('min_ref_coverage', 0.0)
+    delete_bam = kwargs.pop('delete_bam', False)
     try:
         if debug:
             print(f"[Worker Map {sample_name}] Starting...")
@@ -115,25 +139,38 @@ def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
             fastq_file=str(fastq_file_path), **kwargs
         )
         if sam_file:
-            tabeling_improved(
+            mapping_stats = tabeling_improved(
                 samfile=sam_file,
                 threads=kwargs.get('threads', 2),
-                debug=debug
+                debug=debug,
+                min_percent_identity=min_percent_identity,
+                min_ref_coverage=min_ref_coverage,
+                delete_bam=delete_bam,
             )
             if debug:
                 print(f"[Worker Map {sample_name}] Completed.")
-            return (sample_name, "Success")
+            return (sample_name, "Success", mapping_stats)
         else:
             print(f"[Worker Map {sample_name}] ERROR: Mapping failed.")
-            return (sample_name, "Failure (Mapping)")
+            return (sample_name, "Failure (Mapping)", None)
     except Exception as e:
         print(f"[Worker Map {sample_name}] CRITICAL ERROR: {e}")
-        return (sample_name, f"Failure ({e})")
+        return (sample_name, f"Failure ({e})", None)
 
 
 def main():
+    # --- Parallel execution setup ---
+    os.environ.setdefault('PYTHONUNBUFFERED', '1')
+    sys.stdout.reconfigure(line_buffering=True)
+
+    if sys.platform.startswith('linux'):
+        try:
+            multiprocessing.set_start_method('fork', force=True)
+        except RuntimeError:
+            pass
+
     options = parse_arguments()
-    print("--- Metagenomic Pipeline Start (v2.6) ---")
+    print("--- Metagenomic Pipeline Start (v2.7 Optimized) ---")
     check_dependencies()
 
     profiler = None
@@ -163,58 +200,61 @@ def main():
 
     print(f"OTU Table output file: {otu_filename}")
 
+    # =======================================================================
+    # STEP 1: Taxonomy Parsing
+    # =======================================================================
     if profiler:
-        profiler.start_step('Step 0: Taxonomy')
-    print(f"\n--- STEP 0: Taxonomy Parsing on Database (Format: {options.format}) ---")
-    tax_map_filename = f"{db_path.stem}_taxonomy_map.tsv"
-    db_map_path = db_path.parent / tax_map_filename
-    output_map_path = output_dir / tax_map_filename
+        profiler.start_step('Step 1: Taxonomy')
+    print(f"\n--- STEP 1: Taxonomy Parsing on Database (Format: {options.format}) ---")
 
     generated_tax_map_path = None
+    tax_entries = 0
 
     if options.force_tax_map:
         print("Forcing taxonomy map creation (user request)...")
+        tax_map_filename = f"{db_path.stem}_taxonomy_map.tsv"
+        output_map_path = output_dir / tax_map_filename
         try:
-            generated_tax_map_path = _create_tax_map(fasta_path=db_path, tax_map_file=output_map_path,
-                                                     format=options.format, debug=options.debug)
+            generated_tax_map_path, tax_entries = (
+                create_taxonomy_map_from_fasta(
+                    fasta_file=str(db_path),
+                    output_dir=output_dir,
+                    format=options.format,
+                    force_create=True,
+                    debug=options.debug
+                )
+            )
         except Exception as e:
             print(f"Critical error: cannot force tax map creation: {e}")
             sys.exit(1)
     if not generated_tax_map_path:
-        if db_map_path.exists():
-            print(f"Taxonomy map found (Cache DB): {db_map_path.name}")
-            generated_tax_map_path = db_map_path
-        elif output_map_path.exists():
-            print(f"Taxonomy map found (Cache Output): {output_map_path.name}")
-            generated_tax_map_path = output_map_path
-        else:
-            print("Taxonomy map not found. Creating...")
-            try:
-                print(f"Attempting to write to: {db_map_path}")
-                generated_tax_map_path = _create_tax_map(fasta_path=db_path, tax_map_file=db_map_path,
-                                                         format=options.format, debug=options.debug)
-            except (OSError, PermissionError) as e:
-                print(f"  [Info] DB folder not writable ({e}). Writing map to output folder.")
-                try:
-                    generated_tax_map_path = _create_tax_map(fasta_path=db_path, tax_map_file=output_map_path,
-                                                             format=options.format, debug=options.debug)
-                except Exception as e_out:
-                    print(f"Critical error: cannot create tax map: {e_out}")
-                    sys.exit(1)
-            except Exception as e_parse:
-                print(f"Critical error during parsing: {e_parse}")
-                sys.exit(1)
+        generated_tax_map_path, tax_entries = (
+            create_taxonomy_map_from_fasta(
+                fasta_file=str(db_path),
+                output_dir=output_dir,
+                format=options.format,
+                force_create=False,
+                debug=options.debug
+            )
+        )
+
     if not generated_tax_map_path:
         print("CRITICAL ERROR: Taxonomy map not found and not created.")
         sys.exit(1)
 
     if profiler:
-        tax_entries = sum(1 for _ in open(generated_tax_map_path)) - 1 if generated_tax_map_path.exists() else 0
-        profiler.end_step('Step 0: Taxonomy', taxonomy_entries=tax_entries)
+        profiler.end_step('Step 1: Taxonomy', taxonomy_entries=tax_entries)
 
+    # =======================================================================
+    # STEP 2: Sequence Filter
+    # =======================================================================
     if profiler:
-        profiler.start_step('Step 1: Filter')
-    print(f"\n--- STEP 1: Sequence Filter (Min: {options.min_len}, Max: {options.max_len}) ---")
+        profiler.start_step('Step 2: Filter')
+    print(f"\n--- STEP 2: Sequence Filter (Min: {options.min_len}, Max: {options.max_len}) ---")
+    if options.min_percent_identity > 0:
+        print(f"  Alignment quality filter: Min identity = {options.min_percent_identity}%")
+    if options.min_ref_coverage > 0:
+        print(f"  Alignment quality filter: Min ref coverage = {options.min_ref_coverage}%")
 
     try:
         directories_to_process = [
@@ -260,16 +300,21 @@ def main():
         total_good = sum(s.get('good_count', 0) for s in filter_stats_list)
         total_bad = sum(s.get('bad_count', 0) for s in filter_stats_list)
         total_seq = sum(s.get('total_count', 0) for s in filter_stats_list)
-        wall_s = profiler._steps.get('Step 1: Filter', {}).get('wall_time_s') or 0
+        wall_s = time.perf_counter() - profiler._start_wall
         throughput = round(total_seq / wall_s) if wall_s > 0 else 0
-        profiler.end_step('Step 1: Filter',
+        profiler.end_step('Step 2: Filter',
                           directories=len(directories_to_process),
                           sequences_total=total_seq,
                           sequences_good=total_good,
                           sequences_bad=total_bad,
                           throughput_seq_s=throughput)
-        profiler.start_step('Step 1.5: Filter Report')
-    print("\n--- STEP 1.5: Filtering Report ---")
+
+    # =======================================================================
+    # STEP 3: Filter Report  (OPT-7: TSV instead of XLSX)
+    # =======================================================================
+    if profiler:
+        profiler.start_step('Step 3: Filter Report')
+    print("\n--- STEP 3: Filtering Report ---")
     if not filter_stats_list:
         print("No stats available. Skipping report generation.")
     else:
@@ -285,17 +330,23 @@ def main():
                 'bad count', 'good count', 'total count'
             ]
             report_df = report_df[final_report_cols]
-            report_name = f"report_filtering_{options.min_len}_{options.max_len}.xlsx"
+            # OPT-7: TSV is ~100x faster than XLSX round-trip
+            report_name = f"report_filtering_{options.min_len}_{options.max_len}.tsv"
             report_path = output_dir / report_name
-            report_df.to_excel(report_path, index=False, engine='openpyxl')
+            report_df.to_csv(report_path, index=False, sep='\t')
             print(f"Filtering report saved to: {report_path}")
         except Exception as e:
             print(f"ERROR during filtering report creation: {e}")
 
     if profiler:
-        profiler.end_step('Step 1.5: Filter Report')
-        profiler.start_step('Step 2: Mapping')
-    print("\n--- Step 2: Mapping and Tabeling ---")
+        profiler.end_step('Step 3: Filter Report')
+
+    # =======================================================================
+    # STEP 4: Mapping and Tabeling  (OPT-6: imap_unordered for overlap)
+    # =======================================================================
+    if profiler:
+        profiler.start_step('Step 4: Mapping')
+    print("\n--- STEP 4: Mapping and Tabeling ---")
 
     fastq_files_to_process = [
         Path(stats['good_file_out']) for stats in filter_stats_list
@@ -324,7 +375,10 @@ def main():
         'output_dir': str(mapping_dir),
         'kmer_size': options.kmer_size,
         'window_size': options.window_size,
-        'debug': options.debug
+        'debug': options.debug,
+        'min_percent_identity': options.min_percent_identity,
+        'min_ref_coverage': options.min_ref_coverage,
+        'delete_bam': options.delete_bam,
     }
 
     map_worker_task = partial(
@@ -333,28 +387,83 @@ def main():
     )
 
     try:
+        # OPT-6: imap_unordered allows results to stream as they finish
         with multiprocessing.Pool(processes=parallel_jobs_map) as pool:
-            results = pool.map(map_worker_task, fastq_files_to_process)
+            results = []
+            for result_tuple in pool.imap_unordered(map_worker_task, fastq_files_to_process):
+                results.append(result_tuple)
+                sample, status = result_tuple[0], result_tuple[1]
+                print(f"  - {sample}: {status}", flush=True)
 
         print("\nParallel work completed. Summary:")
         success_count = 0
-        for sample, status in results:
-            print(f"  - {sample}: {status}")
+        mapping_stats_list = []
+        for result_tuple in results:
+            sample, status = result_tuple[0], result_tuple[1]
+            stats = result_tuple[2] if len(result_tuple) > 2 else None
             if status == "Success":
                 success_count += 1
+                if stats:
+                    mapping_stats_list.append(stats)
         print(f"Completed successfully: {success_count} / {len(results)}")
     except Exception as e:
         print(f"CRITICAL ERROR during mapping pool: {e}")
         sys.exit(1)
 
+    # Save mapping stats to JSON for the HTML report
+    if mapping_stats_list:
+        total_reads_all = sum(s.get('total_reads', 0) for s in mapping_stats_list)
+        total_mapped_all = sum(s.get('mapped_unfiltered', 0) for s in mapping_stats_list)
+        total_filtered_all = sum(s.get('mapped_filtered', 0) for s in mapping_stats_list)
+        overall_mapping_rate = round(total_mapped_all / total_reads_all * 100, 2) if total_reads_all > 0 else 0.0
+        overall_retention = round(total_filtered_all / total_mapped_all * 100, 2) if total_mapped_all > 0 else 100.0
+
+        # Warn the user when the quality filter removes everything
+        if total_filtered_all == 0 and total_mapped_all > 0:
+            print("\n" + "=" * 70)
+            print("  WARNING: The alignment quality filter removed ALL mapped reads!")
+            print(f"  → {total_mapped_all:,} reads mapped, 0 survived the filter.")
+            print(f"  → min_percent_identity = {options.min_percent_identity}%")
+            print(f"  → min_ref_coverage     = {options.min_ref_coverage}%")
+            print("  The OTU table will be empty. Consider lowering or")
+            print("  disabling (set to 0) the quality filter thresholds.")
+            print("=" * 70 + "\n")
+
+        mapping_json = {
+            'samples': mapping_stats_list,
+            'parameters': {
+                'min_percent_identity': options.min_percent_identity,
+                'min_ref_coverage': options.min_ref_coverage,
+            },
+            'summary': {
+                'total_reads_all': total_reads_all,
+                'total_mapped_all': total_mapped_all,
+                'total_after_quality_filter': total_filtered_all,
+                'overall_mapping_rate_pct': overall_mapping_rate,
+                'overall_quality_retention_pct': overall_retention,
+            }
+        }
+        mapping_stats_path = output_dir / 'mapping_stats.json'
+        try:
+            with open(mapping_stats_path, 'w', encoding='utf-8') as f:
+                json.dump(mapping_json, f, indent=2)
+            print(f"Mapping stats saved to: {mapping_stats_path.name}")
+        except Exception as e:
+            print(f"WARNING: Could not save mapping_stats.json: {e}")
+
     if profiler:
-        success_count_p = sum(1 for _, s in results if s == "Success")
-        profiler.end_step('Step 2: Mapping',
+        success_count_p = sum(1 for r in results if r[1] == "Success")
+        profiler.end_step('Step 4: Mapping',
                           files_to_map=len(fastq_files_to_process),
                           success=success_count_p,
                           failed=len(fastq_files_to_process) - success_count_p)
-        profiler.start_step('Step 2.5: Reformat')
-    print("\n--- STEP 2.5: Index Reformatting ---")
+
+    # =======================================================================
+    # STEP 5: Reformat
+    # =======================================================================
+    if profiler:
+        profiler.start_step('Step 5: Reformat')
+    print("\n--- STEP 5: Index Reformatting ---")
     try:
         reformat_tmp_indices(
             results_dir=str(results_dir),
@@ -365,9 +474,14 @@ def main():
         print(f"ERROR during index reformatting: {e}")
 
     if profiler:
-        profiler.end_step('Step 2.5: Reformat')
-        profiler.start_step('Step 3: OTU Aggregation')
-    print("\n--- Step 3: Results Aggregation ---")
+        profiler.end_step('Step 5: Reformat')
+
+    # =======================================================================
+    # STEP 6: OTU Aggregation
+    # =======================================================================
+    if profiler:
+        profiler.start_step('Step 6: OTU Aggregation')
+    print("\n--- STEP 6: Results Aggregation ---")
 
     try:
         makeOtu_duckdb(
@@ -379,7 +493,7 @@ def main():
         print(f"ERROR during final aggregation: {e}")
 
     if profiler:
-        profiler.end_step('Step 3: OTU Aggregation')
+        profiler.end_step('Step 6: OTU Aggregation')
         profiler.save(output_dir)
 
     print(f"\n--- Pipeline Complete ---")
