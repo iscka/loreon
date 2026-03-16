@@ -494,7 +494,7 @@ def main():
 
     if profiler:
         profiler.end_step('Step 6: OTU Aggregation')
-        profiler.save(output_dir)
+        profiler.save(output_dir, db_name=db_name)
 
     print(f"\n--- Pipeline Complete ---")
     print(f"OTU table saved to: {final_output_file.name}")

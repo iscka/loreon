@@ -69,7 +69,7 @@ class PipelineProfiler:
             **metrics
         })
 
-    def save(self, output_dir: Path) -> Path:
+    def save(self, output_dir: Path, db_name: str = None) -> Path:
         output_dir = Path(output_dir)
         total_wall = round(sum(
             self._steps[n].get('wall_time_s', 0) for n in self._order
@@ -81,14 +81,14 @@ class PipelineProfiler:
             'peak_memory_mb': round(self._peak_mem_mb, 1),
         }
 
-        json_path = output_dir / 'profile_report.json'
+        json_path = output_dir / 'performance_report.json'
         with open(json_path, 'w') as f:
             json.dump(report, f, indent=2)
 
         self._print_summary(report)
         print(f"[PROFILER] JSON report saved to: {json_path}")
 
-        html_path = self._save_html(output_dir, report)
+        html_path = self._save_html(output_dir, report, db_name=db_name)
         if html_path:
             print(f"[PROFILER] HTML report saved to: {html_path}")
 
@@ -98,7 +98,7 @@ class PipelineProfiler:
     # HTML report (Bootstrap 5 + Plotly, consistent with main report)
     # ------------------------------------------------------------------
 
-    def _save_html(self, output_dir: Path, report: dict) -> Path:
+    def _save_html(self, output_dir: Path, report: dict, db_name: str = None) -> Path:
         run_date = report['run_date']
         total_wall = report['total_wall_time_s']
         peak_mem = report['peak_memory_mb']
@@ -115,6 +115,9 @@ class PipelineProfiler:
             return f"{int(h)}h {int(m)}m {s:.0f}s"
 
         total_wall_fmt = _fmt_time(total_wall)
+
+        db_subtitle = f' &mdash; <span class="text-muted fs-5">{db_name}</span>' if db_name else ''
+        db_title_suffix = f' — {db_name}' if db_name else ''
 
         # Collect all extra metric keys across all steps
         base_keys = {'wall_time_s', 'cpu_time_s', 'mem_mb'}
@@ -216,7 +219,7 @@ class PipelineProfiler:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LOREON Pipeline — Performance Report</title>
+    <title>LOREON Pipeline — Performance Report{db_title_suffix}</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
@@ -236,7 +239,7 @@ class PipelineProfiler:
         <!-- Header -->
         <div class="card shadow-sm">
             <div class="card-body">
-                <h1 class="display-5">LOREON Pipeline &mdash; Performance Report</h1>
+                <h1 class="display-5">LOREON Pipeline &mdash; Performance Report{db_subtitle}</h1>
                 <p class="lead mb-2">Run date: {run_date}</p>
                 <!-- EPI2ME-style progress bar -->
                 <div class="progress" style="height: 1.6rem; border-radius: 0.25rem;">
@@ -390,7 +393,15 @@ class PipelineProfiler:
             title: 'Wall Time vs CPU Time per Step',
             barmode: 'group', height: 420,
             yaxis: {{ title: 'Seconds', rangemode: 'tozero' }},
-            xaxis: {{ tickangle: -25 }}
+            xaxis: {{ tickangle: -25 }},
+            updatemenus: [{{
+                buttons: [
+                    {{ label: 'Linear', method: 'relayout', args: [{{'yaxis.type': 'linear', 'yaxis.rangemode': 'tozero'}}] }},
+                    {{ label: 'Log', method: 'relayout', args: [{{'yaxis.type': 'log', 'yaxis.rangemode': 'normal'}}] }}
+                ],
+                direction: 'left', type: 'buttons', showactive: true,
+                x: 1.0, xanchor: 'right', y: 1.15, yanchor: 'top'
+            }}]
         }}, {{ responsive: true }});
 
         // --- Chart 3: Pie/Donut time distribution ---
@@ -420,7 +431,15 @@ class PipelineProfiler:
             title: 'Memory Usage',
             yaxis: {{ title: 'MB', rangemode: 'tozero' }},
             xaxis: {{ tickangle: -25 }},
-            height: 380
+            height: 380,
+            updatemenus: [{{
+                buttons: [
+                    {{ label: 'Linear', method: 'relayout', args: [{{'yaxis.type': 'linear', 'yaxis.rangemode': 'tozero'}}] }},
+                    {{ label: 'Log', method: 'relayout', args: [{{'yaxis.type': 'log', 'yaxis.rangemode': 'normal'}}] }}
+                ],
+                direction: 'left', type: 'buttons', showactive: true,
+                x: 1.0, xanchor: 'right', y: 1.15, yanchor: 'top'
+            }}]
         }}, {{ responsive: true }});
 
         // --- Chart 5: Throughput (if data exists) ---
@@ -438,7 +457,15 @@ class PipelineProfiler:
                 title: 'Processing Throughput',
                 yaxis: {{ title: 'Sequences / second', rangemode: 'tozero' }},
                 xaxis: {{ tickangle: -25 }},
-                height: 380
+                height: 380,
+                updatemenus: [{{
+                    buttons: [
+                        {{ label: 'Linear', method: 'relayout', args: [{{'yaxis.type': 'linear', 'yaxis.rangemode': 'tozero'}}] }},
+                        {{ label: 'Log', method: 'relayout', args: [{{'yaxis.type': 'log', 'yaxis.rangemode': 'normal'}}] }}
+                    ],
+                    direction: 'left', type: 'buttons', showactive: true,
+                    x: 1.0, xanchor: 'right', y: 1.15, yanchor: 'top'
+                }}]
             }}, {{ responsive: true }});
         }}
     </script>
@@ -452,7 +479,7 @@ class PipelineProfiler:
 </body>
 </html>"""
 
-        path = output_dir / 'profile_report.html'
+        path = output_dir / 'performance_report.html'
         try:
             with open(path, 'w', encoding='utf-8') as f:
                 f.write(html)
