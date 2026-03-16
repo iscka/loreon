@@ -70,3 +70,5 @@ Thumbs.db
 LOREON.spec
 EPI2ME_issue_export/launch.json
 /EPI2ME_issue_export
+.claude/worktrees/magical-wescoff/
+/.claude
