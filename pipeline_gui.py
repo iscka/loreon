@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         options_left_layout.addWidget(self.force_tax_map_check)
         self.profile_check = QCheckBox("Enable Performance Profiling")
         self.profile_check.setToolTip(
-            "Saves profile_report.json in the output folder with wall time,\n"
+            "Saves performance_report.json in the output folder with wall time,\n"
             "CPU time, memory and domain metrics for each pipeline step."
         )
         options_left_layout.addWidget(self.profile_check)
