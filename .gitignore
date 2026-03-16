@@ -68,3 +68,5 @@ log/
 .DS_Store
 Thumbs.db
 LOREON.spec
+EPI2ME_issue_export/launch.json
+/EPI2ME_issue_export
