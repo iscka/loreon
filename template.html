@@ -25,6 +25,11 @@
             overflow-x: auto;
             white-space: nowrap;
         }
+
+        /* Left-align all table header cells */
+        .table th {
+            text-align: left !important;
+        }
     </style>
 </head>
 <body>
@@ -187,6 +192,26 @@
             </div>
         </div>
 
+        {% if sankey_json_data and sankey_json_data != 'null' %}
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <h4 class="mb-0">Taxonomic Lineages</h4>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="d-flex flex-wrap gap-2 align-items-center" id="sankey-filters">
+                            <!-- Filter dropdowns are populated dynamically by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="sankey-graph"></div>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="card shadow-sm">
             <div class="card-body">
                 {{ graph_otu_heatmap_div | safe }}
@@ -217,8 +242,9 @@
     <script>
         // --- Inject data from Python ---
         const allGraphData = {{ composition_json_data | safe }};
+        const sankeyData = {{ sankey_json_data | safe }};
 
-        // --- Function to draw/update the graph ---
+        // --- Function to draw/update the composition graph ---
         function updateCompositionGraph(rank) {
             if (!allGraphData) return;
             const filteredData = allGraphData.filter(d => d.Rank === rank);
@@ -242,6 +268,192 @@
             };
 
             Plotly.newPlot('composition-graph', traces, layout, {responsive: true});
+        }
+
+        // ================================================================
+        // Sankey with interactive per-rank filters
+        // ================================================================
+        function initSankey() {
+            if (!sankeyData) return;
+
+            const ranks = sankeyData.ranks;           // ['Kingdom', ..., 'Species']
+            const lineages = sankeyData.lineages;     // [{Kingdom:'...', ..., count:N}, ...]
+            const rankColors = sankeyData.rankColors;
+
+            // --- Build filter dropdowns ---
+            const filtersDiv = document.getElementById('sankey-filters');
+            if (!filtersDiv) return;
+
+            // For each rank except the last (Species has no downstream),
+            // create a dropdown with unique values
+            ranks.forEach((rank, idx) => {
+                // Collect unique values for this rank (exclude Unclassified)
+                const values = [...new Set(lineages.map(l => l[rank]))]
+                    .filter(v => v && v !== 'Unclassified')
+                    .sort();
+
+                if (values.length === 0) return;
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'd-flex align-items-center';
+                wrapper.innerHTML = `
+                    <label class="form-label mb-0 me-1 text-nowrap" style="font-size:0.8rem;">${rank}:</label>
+                    <select class="form-select form-select-sm sankey-filter" data-rank="${rank}" style="min-width:120px;font-size:0.8rem;">
+                        <option value="">All</option>
+                        ${values.map(v => `<option value="${v}">${v}</option>`).join('')}
+                    </select>
+                `;
+                filtersDiv.appendChild(wrapper);
+            });
+
+            // Add cutoff percentage dropdown
+            const cutoffWrapper = document.createElement('div');
+            cutoffWrapper.className = 'd-flex align-items-center';
+            cutoffWrapper.innerHTML = `
+                <label class="form-label mb-0 me-1 text-nowrap" style="font-size:0.8rem;">Cutoff:</label>
+                <select class="form-select form-select-sm" id="sankey-cutoff" style="min-width:100px;font-size:0.8rem;">
+                    <option value="0">None</option>
+                    <option value="0.5">0.5% reads</option>
+                    <option value="1" selected>1% reads</option>
+                    <option value="3">3% reads</option>
+                    <option value="5">5% reads</option>
+                </select>
+            `;
+            filtersDiv.appendChild(cutoffWrapper);
+
+            // Add reset button
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'btn btn-outline-secondary btn-sm';
+            resetBtn.textContent = 'Reset';
+            resetBtn.style.fontSize = '0.8rem';
+            resetBtn.addEventListener('click', () => {
+                document.querySelectorAll('.sankey-filter').forEach(s => s.value = '');
+                document.getElementById('sankey-cutoff').value = '1';
+                drawSankey();
+            });
+            filtersDiv.appendChild(resetBtn);
+
+            // Attach change listeners
+            document.querySelectorAll('.sankey-filter').forEach(sel => {
+                sel.addEventListener('change', drawSankey);
+            });
+            document.getElementById('sankey-cutoff').addEventListener('change', drawSankey);
+
+            // --- Draw function ---
+            function drawSankey() {
+                // Collect active filters
+                const filters = {};
+                document.querySelectorAll('.sankey-filter').forEach(sel => {
+                    const rank = sel.dataset.rank;
+                    const val = sel.value;
+                    if (val) filters[rank] = val;
+                });
+
+                // Filter lineages
+                let filtered = lineages;
+                for (const [rank, val] of Object.entries(filters)) {
+                    filtered = filtered.filter(l => l[rank] === val);
+                }
+
+                if (filtered.length === 0) {
+                    Plotly.purge('sankey-graph');
+                    document.getElementById('sankey-graph').innerHTML =
+                        '<div class="alert alert-warning">No lineages match the selected filters.</div>';
+                    return;
+                }
+
+                // Build nodes and links from filtered lineages
+                const nodeLabels = [];
+                const nodeIndex = {};
+                const nodeRanks = [];
+
+                function getNode(label, rank) {
+                    const key = rank + '::' + label;
+                    if (!(key in nodeIndex)) {
+                        nodeIndex[key] = nodeLabels.length;
+                        nodeLabels.push(label);
+                        nodeRanks.push(rank);
+                    }
+                    return nodeIndex[key];
+                }
+
+                // Aggregate edges
+                const edgeMap = {};
+                filtered.forEach(row => {
+                    for (let i = 0; i < ranks.length - 1; i++) {
+                        const src = row[ranks[i]];
+                        const tgt = row[ranks[i + 1]];
+                        if (src === 'Unclassified' || tgt === 'Unclassified') continue;
+                        const srcIdx = getNode(src, ranks[i]);
+                        const tgtIdx = getNode(tgt, ranks[i + 1]);
+                        const eKey = srcIdx + '->' + tgtIdx;
+                        edgeMap[eKey] = (edgeMap[eKey] || 0) + row.count;
+                    }
+                });
+
+                // Apply cutoff percentage filter on edges
+                const cutoffPct = parseFloat(document.getElementById('sankey-cutoff').value) || 0;
+                const totalReads = filtered.reduce((sum, r) => sum + r.count, 0);
+                const cutoffVal = totalReads / 100 * cutoffPct;
+
+                const linkSource = [], linkTarget = [], linkValue = [];
+                for (const [eKey, val] of Object.entries(edgeMap)) {
+                    if (val < cutoffVal) continue;  // skip edges below cutoff
+                    const [s, t] = eKey.split('->').map(Number);
+                    linkSource.push(s);
+                    linkTarget.push(t);
+                    linkValue.push(val);
+                }
+
+                if (linkSource.length === 0) {
+                    Plotly.purge('sankey-graph');
+                    document.getElementById('sankey-graph').innerHTML =
+                        '<div class="alert alert-warning">No lineages above the selected cutoff threshold.</div>';
+                    return;
+                }
+
+                // Node colors
+                const nColors = nodeRanks.map(r => rankColors[r] || 'rgba(127,127,127,0.5)');
+
+                const data = [{
+                    type: 'sankey',
+                    node: {
+                        pad: 15, thickness: 20,
+                        label: nodeLabels,
+                        color: nColors,
+                        hovertemplate: '%{label}<br>Total: %{value:,}<extra></extra>'
+                    },
+                    link: {
+                        source: linkSource,
+                        target: linkTarget,
+                        value: linkValue,
+                        hovertemplate: '%{source.label} → %{target.label}<br>Reads: %{value:,}<extra></extra>'
+                    },
+                    textfont: {size: 11}
+                }];
+
+                // Build subtitle showing active filters and cutoff
+                let title = 'Taxonomic Lineages (Kingdom → Species)';
+                const filterParts = Object.entries(filters).map(([r, v]) => `${r}: ${v}`);
+                if (cutoffPct > 0) {
+                    filterParts.push(`Cutoff: ${cutoffPct}% (≥${Math.round(cutoffVal).toLocaleString()} reads)`);
+                }
+                if (filterParts.length > 0) {
+                    title += '<br><span style="font-size:12px;color:#666;">' + filterParts.join(' | ') + '</span>';
+                }
+
+                const layout = {
+                    title: { text: title },
+                    font: { size: 12 },
+                    height: 600,
+                    margin: { l: 10, r: 10, t: 60, b: 10 }
+                };
+
+                Plotly.newPlot('sankey-graph', data, layout, {responsive: true});
+            }
+
+            // Initial draw
+            drawSankey();
         }
 
         // --- Activators (when the page is ready) ---
@@ -276,6 +488,9 @@
                 // 3. Draw the initial graph (Family)
                 updateCompositionGraph('Family');
             }
+
+            // 4. Initialize Sankey with filters
+            initSankey();
         });
     </script>
 

@@ -256,33 +256,55 @@ def generate_filter_graphs(df_filter):
 
 
 # ---------------------------------------------------------------------------
-# OPT-9: Vectorized taxonomy aggregation (single-pass split)
+# OPT-9: Taxonomy rank extraction (uses pre-split columns when available)
 # ---------------------------------------------------------------------------
 
+# Column names produced by the split in ResultsReader
+_RANK_COLUMNS = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'Details']
+
+
 def _extract_ranks_vectorized(df_otu, sample_cols):
-    """Split Taxonomy once, extract Family/Genus/Species for all rows."""
-    tax_series = df_otu['Taxonomy'].fillna('')
+    """Extract Family/Genus/Species for all rows.
 
-    # Split by ';' and filter out empty and 'unclassified' parts per row
-    def _clean_split(tax_str):
-        if not isinstance(tax_str, str):
-            return []
-        parts = [p for p in tax_str.split(';') if p and not p.lower().startswith('unclassified')]
-        return parts
-
-    split_lists = tax_series.apply(_clean_split)
-
-    def _get_rank(parts_list, position):
-        try:
-            if len(parts_list) >= abs(position):
-                return parts_list[position]
-        except (IndexError, TypeError):
-            pass
-        return 'Unclassified'
-
+    If the OTU table already contains the pre-split rank columns
+    (Kingdom … Details), use them directly.  Otherwise fall back to
+    the legacy semicolon-split approach for backward compatibility.
+    """
     ranks = {}
-    for rank_name, pos in [('Family', -3), ('Genus', -2), ('Species', -1)]:
-        ranks[rank_name] = split_lists.apply(lambda p, po=pos: _get_rank(p, po))
+    pre_split = all(col in df_otu.columns for col in ('Family', 'Genus', 'Species'))
+
+    if pre_split:
+        # --- New path: use pre-split columns directly ---
+        for rank_name in ('Family', 'Genus', 'Species'):
+            ranks[rank_name] = (
+                df_otu[rank_name]
+                .fillna('')
+                .replace('', 'Unclassified')
+            )
+    else:
+        # --- Legacy fallback: parse the Taxonomy string ---
+        tax_series = df_otu['Taxonomy'].fillna('')
+
+        def _clean_split(tax_str):
+            if not isinstance(tax_str, str):
+                return []
+            return [p for p in tax_str.split(';')
+                    if p and not p.lower().startswith('unclassified')]
+
+        split_lists = tax_series.apply(_clean_split)
+
+        def _get_rank(parts_list, position):
+            try:
+                if len(parts_list) >= abs(position):
+                    return parts_list[position]
+            except (IndexError, TypeError):
+                pass
+            return 'Unclassified'
+
+        for rank_name, pos in [('Family', -3), ('Genus', -2), ('Species', -1)]:
+            ranks[rank_name] = split_lists.apply(
+                lambda p, po=pos: _get_rank(p, po)
+            )
 
     return ranks
 
@@ -315,14 +337,89 @@ def aggregate_by_rank(df_otu, sample_cols, rank_col, rank_name, top_n=15):
     return df_long
 
 
+def generate_sankey(df_otu):
+    """Build Sankey data with per-row lineage information for interactive filtering.
+
+    Returns a JSON string containing:
+      - lineages: list of {Kingdom, Phylum, ..., Species, count} per OTU row
+      - rankColors: color mapping per rank level
+    The actual Sankey rendering and filtering is done in JavaScript (template.html).
+    Returns None if no valid data.
+    """
+    print("Generating Lineages Sankey data...")
+
+    # Determine which rank columns are available
+    sankey_ranks = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
+    pre_split = all(r in df_otu.columns for r in sankey_ranks)
+
+    meta_cols = {'Taxonomy'} | set(_RANK_COLUMNS)
+    sample_cols = [c for c in df_otu.columns if c not in meta_cols]
+
+    if pre_split:
+        rank_series = {r: df_otu[r].fillna('').replace('', 'Unclassified') for r in sankey_ranks}
+    elif 'Taxonomy' in df_otu.columns:
+        tax_parts = df_otu['Taxonomy'].fillna('').apply(
+            lambda t: [p.strip().replace('_', ' ') for p in t.split(';') if p.strip()] if isinstance(t, str) else []
+        )
+        rank_series = {}
+        for idx, rank in enumerate(sankey_ranks):
+            rank_series[rank] = tax_parts.apply(
+                lambda p, i=idx: p[i] if len(p) > i else 'Unclassified'
+            )
+    else:
+        return None
+
+    # Compute total counts per OTU row
+    counts = df_otu[sample_cols].apply(pd.to_numeric, errors='coerce').fillna(0).sum(axis=1)
+
+    # Build per-row lineage records (one per OTU)
+    lineages = []
+    for idx in df_otu.index:
+        row_count = int(counts.get(idx, 0))
+        if row_count <= 0:
+            continue
+        record = {rank: rank_series[rank].get(idx, 'Unclassified') for rank in sankey_ranks}
+        # Skip rows where all ranks are unclassified
+        if all(v == 'Unclassified' for v in record.values()):
+            continue
+        record['count'] = row_count
+        lineages.append(record)
+
+    if not lineages:
+        print("WARNING: No valid lineage data found for Sankey.", file=sys.stderr)
+        return None
+
+    rank_colors = {
+        'Kingdom': 'rgba(31,119,180,0.7)',
+        'Phylum':  'rgba(255,127,14,0.7)',
+        'Class':   'rgba(44,160,44,0.7)',
+        'Order':   'rgba(214,39,40,0.7)',
+        'Family':  'rgba(148,103,189,0.7)',
+        'Genus':   'rgba(140,86,75,0.7)',
+        'Species': 'rgba(227,119,194,0.7)',
+    }
+
+    sankey_data = {
+        'lineages': lineages,
+        'ranks': sankey_ranks,
+        'rankColors': rank_colors,
+    }
+
+    return json.dumps(sankey_data)
+
+
 def generate_otu_data_json(df_otu):
     print("Generating taxonomic data (Family, Genus, Species)...")
 
-    if 'Taxonomy' not in df_otu.columns:
-        print("WARNING: 'Taxonomy' column not found. Skipping OTU graphs.", file=sys.stderr)
+    # Check for taxonomy data (either single column or pre-split columns)
+    has_taxonomy = 'Taxonomy' in df_otu.columns or 'Family' in df_otu.columns
+    if not has_taxonomy:
+        print("WARNING: No taxonomy columns found. Skipping OTU graphs.", file=sys.stderr)
         return "null", None
 
-    sample_cols = [col for col in df_otu.columns if col != 'Taxonomy']
+    # Exclude all taxonomy/metadata columns from sample columns
+    meta_cols = {'Taxonomy'} | set(_RANK_COLUMNS)
+    sample_cols = [col for col in df_otu.columns if col not in meta_cols]
 
     # Ensure sample columns are numeric (DuckDB/XLSX can leave object dtype)
     df_otu[sample_cols] = df_otu[sample_cols].apply(pd.to_numeric, errors='coerce').fillna(0).astype(int)
@@ -343,10 +440,30 @@ def generate_otu_data_json(df_otu):
     top_25_otus = df_counts_only.sum(axis=1).nlargest(25).index
     df_top25 = df_counts_only.loc[top_25_otus]
     df_top25_log = np.log1p(df_top25)
+
+    # Use Species names as Y-axis labels instead of OTU IDs
+    if 'Species' in df_otu.columns:
+        species_labels = df_otu.loc[top_25_otus, 'Species'].fillna('').replace('', 'Unknown')
+        # Disambiguate duplicate species by appending OTU ID
+        seen = {}
+        y_labels = []
+        for otu_id, sp in zip(top_25_otus, species_labels):
+            seen[sp] = seen.get(sp, 0) + 1
+            if seen[sp] > 1:
+                y_labels.append(f"{sp} ({otu_id})")
+            else:
+                y_labels.append(sp)
+        # Second pass: also tag the first occurrence if duplicated
+        for i, sp in enumerate(species_labels):
+            if seen[sp] > 1 and '(' not in y_labels[i]:
+                y_labels[i] = f"{sp} ({top_25_otus[i]})"
+    else:
+        y_labels = list(top_25_otus)
+
     fig_heatmap = px.imshow(
-        df_top25_log, title="Top 25 OTU Heatmap (Log-normalized Abundance)",
-        labels=dict(x="Sample", y="OTU ID", color="Log(Count+1)"),
-        x=df_top25_log.columns, y=df_top25_log.index,
+        df_top25_log, title="Top 25 Species Heatmap (Log-normalized Abundance)",
+        labels=dict(x="Sample", y="Species", color="Log(Count+1)"),
+        x=df_top25_log.columns, y=y_labels,
         aspect="auto", height=700
     )
     fig_heatmap_div = pio.to_html(fig_heatmap, full_html=False, include_plotlyjs=False)
@@ -384,9 +501,11 @@ def main():
     has_otu_data = not df_otu.empty
     if has_otu_data:
         composition_json_data, graph_otu_heatmap_div = generate_otu_data_json(df_otu)
+        sankey_json_data = generate_sankey(df_otu)
     else:
         print("WARNING: OTU table is empty — skipping metagenomic graphs.")
         composition_json_data, graph_otu_heatmap_div = "null", None
+        sankey_json_data = None
 
     # Mapping QC section (optional)
     mapping_data, _ = load_mapping_stats(options.mapping_stats)
@@ -404,15 +523,24 @@ def main():
     )
 
     # OPT-10: Limit OTU HTML table to top 500 rows (full table is in XLSX)
+    # Show only OTU_ID (index), Species, and sample abundance columns
     if has_otu_data:
         total_otu_rows = len(df_otu)
+        _meta = {'Taxonomy'} | set(_RANK_COLUMNS)
+        sample_cols = [c for c in df_otu.columns if c not in _meta]
+
+        # Build a simplified display DataFrame: Species + sample columns only
+        display_cols = []
+        if 'Species' in df_otu.columns:
+            display_cols.append('Species')
+        display_cols.extend(sample_cols)
+
         if total_otu_rows > 500:
             # Sort by total abundance and take top 500
-            sample_cols = [c for c in df_otu.columns if c != 'Taxonomy']
             df_otu_sorted = df_otu.copy()
             df_otu_sorted['_total'] = df_otu_sorted[sample_cols].sum(axis=1)
             df_otu_sorted = df_otu_sorted.sort_values('_total', ascending=False)
-            df_otu_display = df_otu_sorted.head(500).drop(columns=['_total'])
+            df_otu_display = df_otu_sorted.head(500)[display_cols]
             table_otu_html = df_otu_display.to_html(
                 classes="table table-striped table-hover table-sm",
                 index=True, border=0, table_id="otu-table"
@@ -424,7 +552,7 @@ def main():
             )
             print(f"OTU table limited to 500/{total_otu_rows} rows for HTML.")
         else:
-            table_otu_html = df_otu.to_html(
+            table_otu_html = df_otu[display_cols].to_html(
                 classes="table table-striped table-hover table-sm",
                 index=True, border=0, table_id="otu-table"
             )
@@ -445,6 +573,7 @@ def main():
         "table_filter_html": table_filter_html,
         "composition_json_data": composition_json_data,
         "graph_otu_heatmap_div": graph_otu_heatmap_div,
+        "sankey_json_data": sankey_json_data if sankey_json_data else "null",
         "table_otu_html": table_otu_html,
         "mapping_kpis": mapping_kpis,
         "graph_mapping_div": graph_mapping_div,

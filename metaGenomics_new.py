@@ -488,6 +488,7 @@ def main():
             results_dir=str(results_dir),
             output_file=str(final_output_file),
             taxonomy_file=str(generated_tax_map_path),
+            db_format=options.format,
         )
     except Exception as e:
         print(f"ERROR during final aggregation: {e}")

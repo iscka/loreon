@@ -6,6 +6,10 @@ import duckdb
 import pandas as pd
 
 
+# Taxonomy rank columns for the split OTU table
+TAXONOMY_RANKS = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species', 'Details']
+
+
 def natural_sort_key(s):
     match = re.search(r'(\d+)', str(s))
     if match:
@@ -13,7 +17,63 @@ def natural_sort_key(s):
     return (1, str(s))
 
 
-def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str):
+def _split_taxonomy_series(taxonomy_series: pd.Series, db_format: str = 'unite') -> pd.DataFrame:
+    """Split a Taxonomy Series (semicolon-separated) into 8 rank columns.
+
+    Rank positions by format:
+      unite / eukariome / cbs:  Kingdom;Phylum;Class;Order;Family;Genus;Species
+      silva:                    Domain(=Kingdom);Phylum;Class;Order;Family;Genus[;Species]
+      none:                     best-effort positional assignment
+
+    Species is always stored as binomial (Genus + epithet).
+    Anything beyond 7 core ranks is collected into 'Details'.
+    """
+
+    def _split_one(tax_str):
+        if not isinstance(tax_str, str) or not tax_str.strip():
+            return [''] * 8
+
+        # Replace underscores with spaces (databases like UNITE use
+        # underscores as word separators, e.g. "Tuber_melanosporum")
+        parts = [p.strip().replace('_', ' ') for p in tax_str.split(';') if p.strip()]
+
+        result = [''] * 8  # Kingdom, Phylum, Class, Order, Family, Genus, Species, Details
+
+        # Assign parts to rank positions (max 7 core ranks)
+        for i in range(min(len(parts), 7)):
+            result[i] = parts[i]
+
+        # Anything beyond 7 parts → Details
+        if len(parts) > 7:
+            result[7] = ';'.join(parts[7:])
+
+        # --- Ensure Species is binomial ---
+        genus = result[5]
+        species = result[6]
+        if species:
+            sp_words = species.split()
+            if len(sp_words) == 1 and genus:
+                # Single epithet → prepend genus for binomial
+                result[6] = f"{genus} {species}"
+            elif len(sp_words) > 2:
+                # More than binomial → keep first two words, rest → Details
+                result[6] = f"{sp_words[0]} {sp_words[1]}"
+                extras = ' '.join(sp_words[2:])
+                result[7] = f"{extras};{result[7]}" if result[7] else extras
+            # len == 2: already binomial, keep as-is
+
+        return result
+
+    split_data = taxonomy_series.apply(_split_one)
+    return pd.DataFrame(
+        split_data.tolist(),
+        columns=TAXONOMY_RANKS,
+        index=taxonomy_series.index
+    )
+
+
+def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
+                   db_format: str = 'unite'):
     results_path = Path(results_dir)
     output_path = Path(output_file)
 
@@ -70,7 +130,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str):
                 columns={{'OTU_ID': 'VARCHAR', 'Taxonomy': 'VARCHAR'}}
             )
         )
-        SELECT t.OTU_ID, t.Taxonomy, c.*
+        SELECT t.OTU_ID, t.Taxonomy, c.* EXCLUDE (otu_id)
         FROM taxonomy t
         INNER JOIN counts c ON t.OTU_ID = c.otu_id;
         """
@@ -110,10 +170,12 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str):
             return
 
         if has_tax:
-            # DuckDB join returns: OTU_ID, Taxonomy, otu_id, sample1, sample2, ...
-            # Drop the duplicate otu_id column from the counts side
-            if 'otu_id' in final_df.columns:
-                final_df = final_df.drop(columns=['otu_id'])
+            # DuckDB join may produce duplicate otu_id variants (otu_id, otu_id_1, etc.)
+            # The EXCLUDE clause should prevent this, but drop any leftovers to be safe
+            otu_id_dupes = [c for c in final_df.columns
+                           if c.lower().startswith('otu_id') and c != 'OTU_ID']
+            if otu_id_dupes:
+                final_df = final_df.drop(columns=otu_id_dupes)
             final_df = final_df.set_index('OTU_ID')
         else:
             final_df = final_df.set_index('otu_id')
@@ -125,9 +187,21 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str):
         num_cols = final_df.select_dtypes(include='number').columns
         final_df[num_cols] = final_df[num_cols].astype(int)
 
+        # --- Split Taxonomy into 8 rank columns ---
+        if 'Taxonomy' in final_df.columns:
+            print(f"Splitting taxonomy into rank columns (format: {db_format})...")
+            rank_df = _split_taxonomy_series(final_df['Taxonomy'], db_format=db_format)
+            # Insert rank columns right after Taxonomy
+            for i, col in enumerate(TAXONOMY_RANKS):
+                final_df.insert(
+                    final_df.columns.get_loc('Taxonomy') + 1 + i,
+                    col, rank_df[col]
+                )
+
         # Natural-sort sample columns
         print("Applying natural sort to sample columns (barcode01, barcode02, ...)...")
-        tax_cols = ['Taxonomy'] if 'Taxonomy' in final_df.columns else []
+        meta_cols = ['Taxonomy'] + TAXONOMY_RANKS
+        tax_cols = [c for c in meta_cols if c in final_df.columns]
         sample_columns = [c for c in final_df.columns if c not in tax_cols]
         sorted_sample_columns = sorted(sample_columns, key=natural_sort_key)
         final_df = final_df[tax_cols + sorted_sample_columns]
