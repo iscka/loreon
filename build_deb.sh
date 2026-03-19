@@ -163,6 +163,7 @@ Name=${APP_NAME_DISPLAY}
 GenericName=Metagenomic Pipeline
 Comment=${DESCRIPTION}
 Exec=${INSTALL_PREFIX}/${APP_NAME_DISPLAY}
+Path=${INSTALL_PREFIX}
 Icon=${INSTALL_PREFIX}/loreon_app_icon_2.png
 Terminal=false
 Type=Application
@@ -290,13 +291,24 @@ Description: ${DESCRIPTION}
  Install via: conda install -c bioconda minimap2 samtools
 CTRL
 
+# CLI launcher wrapper (more robust than a bare symlink)
+mkdir -p "$DEB_ROOT/usr/local/bin"
+cat > "$DEB_ROOT/usr/local/bin/loreon" << 'LAUNCHER'
+#!/bin/bash
+# LOREON GUI launcher — ensures correct working directory and library paths
+APP_DIR="/opt/loreon"
+export LD_LIBRARY_PATH="${APP_DIR}/_internal${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+cd "$APP_DIR"
+exec "$APP_DIR/LOREON" "$@"
+LAUNCHER
+chmod 755 "$DEB_ROOT/usr/local/bin/loreon"
+
 # postinst — runs after installation
 cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTINST'
 #!/bin/bash
 set -e
 
-# Create symlinks for CLI access
-ln -sf /opt/loreon/LOREON /usr/local/bin/loreon
+# CLI script symlink
 ln -sf /opt/loreon/metaGenomics_new.py /usr/local/bin/loreon-cli
 
 # Make CLI script executable
@@ -342,7 +354,7 @@ cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERM'
 #!/bin/bash
 set -e
 
-# Remove symlinks
+# Remove launcher wrapper and CLI symlink
 rm -f /usr/local/bin/loreon
 rm -f /usr/local/bin/loreon-cli
 
@@ -387,6 +399,10 @@ chmod 755 "$DEB_ROOT${INSTALL_PREFIX}/${APP_NAME_DISPLAY}"
 chmod 755 "$DEB_ROOT${INSTALL_PREFIX}/metaGenomics_new.py"
 find "$DEB_ROOT${INSTALL_PREFIX}" -name "*.so" -exec chmod 755 {} \; 2>/dev/null || true
 find "$DEB_ROOT${INSTALL_PREFIX}" -name "*.so.*" -exec chmod 755 {} \; 2>/dev/null || true
+# PyInstaller helper binaries inside _internal/ (e.g. python3, QtWebEngineProcess)
+find "$DEB_ROOT${INSTALL_PREFIX}/_internal" -type f -executable -exec chmod 755 {} \; 2>/dev/null || true
+find "$DEB_ROOT${INSTALL_PREFIX}/_internal" -type f -name "python*" -exec chmod 755 {} \; 2>/dev/null || true
+find "$DEB_ROOT${INSTALL_PREFIX}/_internal" -type f -name "Qt*Process" -exec chmod 755 {} \; 2>/dev/null || true
 
 # DEBIAN scripts
 chmod 755 "$DEB_ROOT/DEBIAN/postinst"

@@ -1,11 +1,44 @@
 #!/usr/bin/env python3
 
+import os
 import shutil
 import subprocess
 import sys
 import multiprocessing
 from datetime import datetime
 from pathlib import Path
+
+# --- PyInstaller frozen-app fixups (must run before any PyQt5 import) ---
+if getattr(sys, 'frozen', False):
+    _app_dir = Path(sys.executable).parent
+    _internal = _app_dir / '_internal'
+
+    # Qt platform plugins live inside the bundled _internal directory
+    _qt_plugins = _internal / 'PyQt5' / 'Qt5' / 'plugins'
+    if not _qt_plugins.exists():
+        _qt_plugins = _internal / 'PyQt5' / 'Qt' / 'plugins'
+    if _qt_plugins.exists():
+        os.environ['QT_PLUGIN_PATH'] = str(_qt_plugins)
+        os.environ.setdefault('QT_QPA_PLATFORM_PLUGIN_PATH',
+                              str(_qt_plugins / 'platforms'))
+
+    # Ensure bundled shared libraries are found (platform-specific)
+    _internal_str = str(_internal)
+    if sys.platform == 'linux':
+        _ld = os.environ.get('LD_LIBRARY_PATH', '')
+        os.environ['LD_LIBRARY_PATH'] = (
+            f"{_internal_str}:{_ld}" if _ld else _internal_str
+        )
+    elif sys.platform == 'darwin':
+        _dy = os.environ.get('DYLD_LIBRARY_PATH', '')
+        os.environ['DYLD_LIBRARY_PATH'] = (
+            f"{_internal_str}:{_dy}" if _dy else _internal_str
+        )
+    elif sys.platform == 'win32':
+        os.environ['PATH'] = (
+            f"{_internal_str};{os.environ.get('PATH', '')}"
+        )
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
