@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 
+from venv_manager import get_venv_python
+
 DOCKER_IMAGE = "loreon:latest"
 
 
@@ -115,10 +117,18 @@ class PipelineWorker(QObject):
         names = self._report_names()
         return Path(self.settings["output_dir"]) / names["html_report"]
 
+    def _get_python(self):
+        """Return the Python interpreter to use for running pipeline scripts.
+
+        When frozen (PyInstaller), uses the venv interpreter managed by
+        venv_manager.  When running from source, uses sys.executable.
+        """
+        return get_venv_python()
+
     def _build_native_pipeline_cmd(self):
         script_path = str(Path(__file__).parent / "metaGenomics_new.py")
         # -u: force unbuffered stdout/stderr so log lines appear in real time
-        return [sys.executable, "-u", script_path] + self._pipeline_args(
+        return [self._get_python(), "-u", script_path] + self._pipeline_args(
             self.settings["input_dir"],
             self.settings["output_dir"],
             self.settings["db_path"],
@@ -129,12 +139,16 @@ class PipelineWorker(QObject):
         output_dir = Path(self.settings["output_dir"])
         names = self._report_names()
         mapping_stats_path = output_dir / names["mapping_stats"]
+        min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
+        max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
         cmd = [
-            sys.executable, "-u", script_path,
+            self._get_python(), "-u", script_path,
             "-f", str(output_dir / names["filter_report"]),
             "-otu", str(output_dir / names["otu_table"]),
             "-o", str(output_dir / names["html_report"]),
             "-pn", names["project_title"],
+            "--min-len", str(min_len),
+            "--max-len", str(max_len),
         ]
         if mapping_stats_path.exists():
             cmd.extend(["-ms", str(mapping_stats_path)])
@@ -165,12 +179,16 @@ class PipelineWorker(QObject):
         names = self._report_names()
         output_dir = Path(self.settings["output_dir"])
         mapping_stats_path = output_dir / names["mapping_stats"]
+        min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
+        max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
         cmd = self._docker_base_cmd() + [
             "python3", "/app/report_generator.py",
             "-f", f"/data/output/{names['filter_report']}",
             "-otu", f"/data/output/{names['otu_table']}",
             "-o", f"/data/output/{names['html_report']}",
             "-pn", names["project_title"],
+            "--min-len", str(min_len),
+            "--max-len", str(max_len),
         ]
         if mapping_stats_path.exists():
             cmd.extend(["-ms", f"/data/output/{names['mapping_stats']}"])

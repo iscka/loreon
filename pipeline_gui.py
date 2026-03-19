@@ -615,6 +615,53 @@ class MainWindow(QMainWindow):
             event.accept()
 
 
+def _ensure_venv(app):
+    """Check and create the pipeline virtualenv when running from a frozen bundle.
+
+    Shows a progress dialog during first-time setup.  If the venv is
+    already present and valid, returns immediately.
+    """
+    if not getattr(sys, 'frozen', False):
+        return True
+
+    from venv_manager import is_venv_ready, create_venv
+
+    if is_venv_ready():
+        return True
+
+    # Show a setup dialog
+    from PyQt5.QtWidgets import QProgressDialog
+    progress = QProgressDialog(
+        "Setting up LOREON environment...\n"
+        "This only happens on first launch.",
+        None, 0, 0
+    )
+    progress.setWindowTitle("LOREON Setup")
+    progress.setMinimumWidth(450)
+    progress.setCancelButton(None)
+    progress.setWindowModality(Qt.ApplicationModal)
+    progress.show()
+    app.processEvents()
+
+    try:
+        def _on_progress(msg):
+            progress.setLabelText(msg)
+            app.processEvents()
+
+        create_venv(progress_callback=_on_progress)
+        progress.close()
+        return True
+
+    except Exception as e:
+        progress.close()
+        QMessageBox.critical(
+            None, "LOREON Setup Error",
+            f"Failed to set up the Python environment:\n\n{e}\n\n"
+            "Make sure Python 3.8+ is installed and available in PATH."
+        )
+        return False
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
     app = QApplication(sys.argv)
@@ -634,6 +681,10 @@ if __name__ == "__main__":
         QTimer.singleShot(1000, loop.quit)
         loop.exec_()
         splash.close()
+
+    # Ensure pipeline venv is ready (first-launch setup)
+    if not _ensure_venv(app):
+        sys.exit(1)
 
     window = MainWindow()
     window.show()

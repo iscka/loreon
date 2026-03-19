@@ -43,6 +43,50 @@
             </div>
         </div>
 
+        {% if analysis_params %}
+        <div class="card shadow-sm border-start border-4 border-primary">
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap align-items-center gap-4">
+                    <strong class="text-primary">Analysis Parameters:</strong>
+
+                    {# --- Length Filter --- #}
+                    {% if analysis_params.len_filter_active is not none %}
+                        {% if analysis_params.len_filter_active %}
+                        <span>
+                            <i class="text-success">&#10003;</i> Length Filter:
+                            <strong>{{ analysis_params.min_len }}</strong> &ndash; <strong>{{ analysis_params.max_len }}</strong> bp
+                        </span>
+                        {% else %}
+                        <span>
+                            <i class="text-secondary">&#10007;</i> Length Filter: <span class="text-muted">Disabled</span>
+                        </span>
+                        {% endif %}
+                    {% endif %}
+
+                    {# --- Quality Filter --- #}
+                    {% if analysis_params.quality_filter_active %}
+                    <span>
+                        <i class="text-success">&#10003;</i> Quality Filter:
+                        {% if analysis_params.min_percent_identity > 0 %}
+                            Identity &ge; <strong>{{ analysis_params.min_percent_identity }}%</strong>
+                        {% endif %}
+                        {% if analysis_params.min_percent_identity > 0 and analysis_params.min_ref_coverage > 0 %}
+                            &nbsp;|&nbsp;
+                        {% endif %}
+                        {% if analysis_params.min_ref_coverage > 0 %}
+                            Ref Coverage &ge; <strong>{{ analysis_params.min_ref_coverage }}%</strong>
+                        {% endif %}
+                    </span>
+                    {% else %}
+                    <span>
+                        <i class="text-secondary">&#10007;</i> Quality Filter: <span class="text-muted">Disabled</span>
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
         <div class="row">
             <div class="col-md col-sm-6">
                 <div class="card kpi-card shadow-sm"><div class="card-body">
@@ -228,10 +272,22 @@
         <div class="alert alert-warning mt-3" role="alert">
             <h5 class="alert-heading">No OTU data available</h5>
             <p class="mb-0">
-                The alignment quality filter removed all mapped reads, so no OTU table could be generated.
-                Consider lowering or disabling (set to 0) the <strong>Min Percent Identity</strong> and/or
-                <strong>Min Reference Coverage</strong> thresholds and re-running the analysis.
+                No OTU table could be generated. Possible causes:
             </p>
+            <ul class="mb-0 mt-1">
+                {% if mapping_kpis and mapping_kpis.quality_filter_active %}
+                <li>The alignment quality filter may have removed all mapped reads.
+                    Consider lowering or disabling (set to 0) the <strong>Min Percent Identity</strong>
+                    and/or <strong>Min Reference Coverage</strong> thresholds.</li>
+                {% endif %}
+                <li>Verify that the <strong>database format</strong> selected in the GUI matches the actual
+                    database (e.g. <em>eukariome</em> vs <em>unite</em> vs <em>silva</em>). A format mismatch
+                    prevents the taxonomy join from matching any reads.</li>
+                {% if analysis_params and analysis_params.len_filter_active %}
+                <li>The length filter ({{ analysis_params.min_len }}&ndash;{{ analysis_params.max_len }} bp) may be too
+                    restrictive, leaving too few sequences for meaningful mapping.</li>
+                {% endif %}
+            </ul>
         </div>
         {% endif %}
 

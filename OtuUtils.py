@@ -78,6 +78,10 @@ def filter_and_merge_directory(
 ):
     dir_name = input_dir.name
 
+    # Treat 0 as "no limit" (consistent with quality filter logic)
+    if max_len <= 0:
+        max_len = 999_999_999
+
     file_list = list(input_dir.glob('**/*.f*q.gz')) + \
                 list(input_dir.glob('**/*.f*q'))
 
