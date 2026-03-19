@@ -11,6 +11,19 @@ from venv_manager import get_venv_python
 DOCKER_IMAGE = "loreon:latest"
 
 
+def _app_root() -> Path:
+    """Return the application root directory.
+
+    When running from a PyInstaller bundle, __file__ points inside
+    _internal/ but the .py data files live one level up next to the
+    executable.  When running from source, __file__'s parent is correct.
+    """
+    if getattr(sys, 'frozen', False):
+        # PyInstaller: executable is /opt/loreon/LOREON
+        return Path(sys.executable).parent
+    return Path(__file__).parent
+
+
 class PipelineWorker(QObject):
 
     log_signal = pyqtSignal(str)
@@ -126,7 +139,7 @@ class PipelineWorker(QObject):
         return get_venv_python()
 
     def _build_native_pipeline_cmd(self):
-        script_path = str(Path(__file__).parent / "metaGenomics_new.py")
+        script_path = str(_app_root() / "metaGenomics_new.py")
         # -u: force unbuffered stdout/stderr so log lines appear in real time
         return [self._get_python(), "-u", script_path] + self._pipeline_args(
             self.settings["input_dir"],
@@ -135,7 +148,7 @@ class PipelineWorker(QObject):
         )
 
     def _build_native_report_cmd(self):
-        script_path = str(Path(__file__).parent / "report_generator.py")
+        script_path = str(_app_root() / "report_generator.py")
         output_dir = Path(self.settings["output_dir"])
         names = self._report_names()
         mapping_stats_path = output_dir / names["mapping_stats"]
@@ -154,15 +167,20 @@ class PipelineWorker(QObject):
             cmd.extend(["-ms", str(mapping_stats_path)])
         return cmd
 
+    @staticmethod
+    def _docker_path(p: Path) -> str:
+        """Convert a host path to Docker-compatible format (forward slashes)."""
+        return str(p).replace('\\', '/')
+
     def _docker_base_cmd(self):
         input_dir = Path(self.settings["input_dir"])
         output_dir = Path(self.settings["output_dir"])
         db_path = Path(self.settings["db_path"])
         return [
             "docker", "run", "--rm",
-            "-v", f"{input_dir}:/data/input:ro",
-            "-v", f"{output_dir}:/data/output",
-            "-v", f"{db_path.parent}:/data/db",
+            "-v", f"{self._docker_path(input_dir)}:/data/input:ro",
+            "-v", f"{self._docker_path(output_dir)}:/data/output",
+            "-v", f"{self._docker_path(db_path.parent)}:/data/db",
             DOCKER_IMAGE,
         ]
 
@@ -265,7 +283,7 @@ class PipelineWorker(QObject):
                         )
                     else:
                         os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                except ProcessLookupError:
+                except (ProcessLookupError, AttributeError):
                     pass
                 except OSError:
                     try:

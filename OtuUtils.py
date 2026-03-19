@@ -329,10 +329,10 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         quality_conditions.append(
             f"alen*100>={min_ref_coverage}*rlen"
         )
-    e_filter = ""
+    e_filter_args = []          # list form for Popen (cross-platform safe)
     if quality_conditions:
         combined_expr = " && ".join(quality_conditions)
-        e_filter = f' -e "{combined_expr}"'
+        e_filter_args = ['-e', combined_expr]
         print(f"[{fname}] Quality filter expression: {combined_expr}", flush=True)
 
     mapping_stats = {
@@ -366,15 +366,27 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         if debug:
             print(f"[{fname}] Pre-filter: total={stats_raw['total']}, mapped={stats_raw['mapped']}", flush=True)
 
-        # 2) SAM → filter -F 0x904 + quality expr → sort → filtered BAM (single pipeline)
-        cmd_filtered_pipe = (
-            f"samtools view -@{thread_str} -bS -F 0x904{e_filter} '{samfile}' | "
-            f"samtools sort -@{thread_str} -o '{filtered_sorted_bam}' -"
-        )
+        # 2) SAM → filter -F 0x904 + quality expr → sort → filtered BAM
+        #    Uses Popen pipe instead of shell=True for cross-platform safety
+        cmd_view = [
+            'samtools', 'view', f'-@{thread_str}', '-bS', '-F', '0x904',
+        ] + e_filter_args + [samfile]
+        cmd_sort = [
+            'samtools', 'sort', f'-@{thread_str}', '-o', str(filtered_sorted_bam), '-',
+        ]
         if debug:
-            print(f"[{fname}] CMD (Filter+Sort): {cmd_filtered_pipe}", flush=True)
-        subprocess.run(cmd_filtered_pipe, shell=True, check=True,
-                       capture_output=True, text=True, encoding='utf-8')
+            print(f"[{fname}] CMD (view): {' '.join(cmd_view)}", flush=True)
+            print(f"[{fname}] CMD (sort): {' '.join(cmd_sort)}", flush=True)
+        proc_view = subprocess.Popen(cmd_view, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc_sort = subprocess.Popen(cmd_sort, stdin=proc_view.stdout,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        proc_view.stdout.close()  # allow view to receive SIGPIPE if sort exits
+        _, sort_stderr = proc_sort.communicate()
+        view_rc = proc_view.wait()
+        if view_rc != 0:
+            raise subprocess.CalledProcessError(view_rc, cmd_view)
+        if proc_sort.returncode != 0:
+            raise subprocess.CalledProcessError(proc_sort.returncode, cmd_sort, stderr=sort_stderr)
 
         # 3) Index the filtered BAM
         subprocess.run(['samtools', 'index', f'-@{thread_str}', str(filtered_sorted_bam)],
@@ -655,12 +667,12 @@ def create_taxonomy_map_from_fasta(
 
     if db_map_path.exists():
         print(f"Taxonomy map found (Cache DB): {db_map_path}")
-        count = sum(1 for _ in open(db_map_path)) - 1
+        count = sum(1 for _ in open(db_map_path, encoding='utf-8')) - 1
         return db_map_path, count
 
     if output_map_path.exists():
         print(f"Taxonomy map found (Cache Output): {output_map_path}")
-        count = sum(1 for _ in open(output_map_path)) - 1
+        count = sum(1 for _ in open(output_map_path, encoding='utf-8')) - 1
         return output_map_path, count
 
     print("Taxonomy map not found in cache. Creating (may take time)...")

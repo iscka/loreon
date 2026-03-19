@@ -3,6 +3,7 @@ import time
 import functools
 import datetime
 import json
+from pathlib import Path
 
 
 class PipelineLogger:
@@ -84,7 +85,9 @@ class PipelineLogger:
         print(f"\nSaving log to file: {filepath}...")
         try:
             # Use DuckDB's COPY command to export data to CSV
-            self.con.execute(f"COPY log_pipeline TO '{filepath}' (HEADER, DELIMITER ',')")
+            # Use forward slashes for DuckDB compatibility on Windows
+            safe_path = str(Path(filepath)).replace('\\', '/')
+            self.con.execute(f"COPY log_pipeline TO '{safe_path}' (HEADER, DELIMITER ',')")
             print("Save completed successfully.")
         except Exception as e:
             print(f"Error while saving the CSV file: {e}")
