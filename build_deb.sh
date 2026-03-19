@@ -47,7 +47,7 @@ ARCH="amd64"
 DEB_NAME="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
 INSTALL_PREFIX="/opt/loreon"
 
-MAINTAINER="Roberto Scarponi <roberto.scarponi@unipg.it>"
+MAINTAINER="Roberto Scarponi <roberto.scarponi@dottorandi.unipg.it>"
 DESCRIPTION="Long-Read ONT Metagenomic Pipeline"
 HOMEPAGE="https://github.com/iscka/loreon"
 
@@ -104,7 +104,7 @@ rm -rf build dist "${APP_NAME_DISPLAY}.spec" deb_build 2>/dev/null || true
 
 # ── Install build tools ─────────────────────────────────────────────────────
 info "Installing/upgrading PyInstaller..."
-python3 -m pip install pyinstaller --quiet --upgrade
+pipx install pyinstaller
 
 # ── PyInstaller build ───────────────────────────────────────────────────────
 info "Running PyInstaller (this may take a few minutes)..."
