@@ -104,11 +104,15 @@ rm -rf build dist "${APP_NAME_DISPLAY}.spec" deb_build 2>/dev/null || true
 
 # ── Install build tools ─────────────────────────────────────────────────────
 info "Installing/upgrading PyInstaller..."
-pipx install pyinstaller
+pip install --upgrade pyinstaller
+
+# Verify PyQt5 is available in the SAME Python used for building
+python3 -c "import PyQt5; print(f'PyQt5 found: {PyQt5.__file__}')" \
+    || error "PyQt5 not installed. Run: pip install PyQt5"
 
 # ── PyInstaller build ───────────────────────────────────────────────────────
 info "Running PyInstaller (this may take a few minutes)..."
-python3 -m PyInstaller \
+pyinstaller \
     --onedir \
     --windowed \
     --name "$APP_NAME_DISPLAY" \
