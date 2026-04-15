@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LOREON Metagenomic Pipeline (OTU Gen v3.3 GUI)")
+        self.setWindowTitle("LOREON Metagenomic Pipeline GUI v1.0)")
         self.setGeometry(100, 100, 900, 750)
         self.is_running = False
         self._log_file = None
