@@ -308,26 +308,56 @@ class MainWindow(QMainWindow):
         filter_box.setLayout(filter_layout)
         options_layout.addWidget(filter_box)
 
-        perf_box = QGroupBox("Performance (Threads)")
+        # --- Detect hardware and propose optimal defaults ---
+        hw_cpu_count = multiprocessing.cpu_count()
+        # Default threads/job = 2 (good balance between per-task speed and
+        # parallel sample throughput). Parallel jobs = total_threads // threads_per_job
+        default_threads_per_job = 2 if hw_cpu_count >= 4 else 1
+        default_parallel_jobs = max(1, hw_cpu_count // default_threads_per_job)
+
+        perf_box = QGroupBox(f"Performance (Threads) — {hw_cpu_count} CPU cores detected")
         perf_layout = QGridLayout()
+
         self.total_threads_input = QSpinBox()
-        self.total_threads_input.setRange(1, multiprocessing.cpu_count())
-        self.total_threads_input.setValue(8)
+        self.total_threads_input.setRange(1, hw_cpu_count)
+        self.total_threads_input.setValue(hw_cpu_count)  # propose max
+        self.total_threads_input.setToolTip(
+            f"Total CPU threads to use across all parallel jobs.\n"
+            f"Hardware maximum: {hw_cpu_count} cores."
+        )
+
         self.job_threads_input = QSpinBox()
-        self.job_threads_input.setRange(1, multiprocessing.cpu_count())
-        self.job_threads_input.setValue(2)
+        self.job_threads_input.setRange(1, hw_cpu_count)
+        self.job_threads_input.setValue(default_threads_per_job)
+        self.job_threads_input.setToolTip(
+            f"Threads dedicated to each single job (minimap2 alignment).\n"
+            f"Parallel jobs = Total Threads / Threads per Job.\n"
+            f"With {hw_cpu_count} cores and {default_threads_per_job} threads/job → "
+            f"{default_parallel_jobs} parallel samples."
+        )
+
         self.kmer_input = QSpinBox()
         self.kmer_input.setValue(15)
         self.window_input = QSpinBox()
         self.window_input.setValue(10)
+
         perf_layout.addWidget(QLabel("Total Threads (-T):"), 0, 0)
         perf_layout.addWidget(self.total_threads_input, 0, 1)
         perf_layout.addWidget(QLabel("Threads/Job (-t):"), 1, 0)
         perf_layout.addWidget(self.job_threads_input, 1, 1)
-        perf_layout.addWidget(QLabel("K-mer (-k):"), 2, 0)
-        perf_layout.addWidget(self.kmer_input, 2, 1)
-        perf_layout.addWidget(QLabel("Window (-w):"), 3, 0)
-        perf_layout.addWidget(self.window_input, 3, 1)
+
+        # Live hint: shows current parallel jobs count, updates when spinboxes change
+        self.parallel_jobs_hint = QLabel()
+        self.parallel_jobs_hint.setStyleSheet("color: #666; font-style: italic;")
+        self._update_parallel_jobs_hint()
+        self.total_threads_input.valueChanged.connect(self._update_parallel_jobs_hint)
+        self.job_threads_input.valueChanged.connect(self._update_parallel_jobs_hint)
+        perf_layout.addWidget(self.parallel_jobs_hint, 2, 0, 1, 2)
+
+        perf_layout.addWidget(QLabel("K-mer (-k):"), 3, 0)
+        perf_layout.addWidget(self.kmer_input, 3, 1)
+        perf_layout.addWidget(QLabel("Window (-w):"), 4, 0)
+        perf_layout.addWidget(self.window_input, 4, 1)
         perf_box.setLayout(perf_layout)
         options_layout.addWidget(perf_box)
         options_group.setLayout(options_layout)
@@ -402,6 +432,15 @@ class MainWindow(QMainWindow):
         central_widget = QWidget()
         central_widget.setLayout(outer_layout)
         self.setCentralWidget(central_widget)
+
+    def _update_parallel_jobs_hint(self):
+        """Update the live hint showing how many parallel samples will run."""
+        total = self.total_threads_input.value()
+        per_job = self.job_threads_input.value()
+        parallel_jobs = max(1, total // per_job)
+        self.parallel_jobs_hint.setText(
+            f"→ {parallel_jobs} parallel samples × {per_job} threads each"
+        )
 
     def _show_credits(self):
         CreditsDialog(self).exec_()
