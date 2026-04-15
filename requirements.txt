@@ -9,6 +9,10 @@ duckdb>=0.8.0
 
 # Excel support
 openpyxl>=3.0.0
+xlsxwriter>=3.0.0
+
+# Performance (optional — falls back to stdlib if unavailable)
+isal>=1.0.0
 
 # GUI (PyQt5)
 PyQt5>=5.15.0

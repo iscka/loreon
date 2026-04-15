@@ -72,6 +72,79 @@ def _split_taxonomy_series(taxonomy_series: pd.Series, db_format: str = 'unite')
     )
 
 
+def _build_reformat_sql(db_format: str) -> str:
+    """Return a DuckDB SQL expression that extracts the canonical OTU_ID
+    from the raw index column, matching the logic in reformat_tmp_indices.
+
+    This replaces Step 5 (reformat_tmp_indices) entirely — the OTU ID
+    reformatting now happens inside the DuckDB query, avoiding a full
+    read-write cycle on every .tmp.txt file.
+    """
+    if db_format == 'unite':
+        # "SH1234567.08FU|reps|Fungi|..." → "reps|Fungi" (parts[1]|parts[2])
+        return ("split_part(otu_id, '|', 2) || '|' || split_part(otu_id, '|', 3)")
+    elif db_format == 'eukariome':
+        # "accession;taxonomy..." → "accession"
+        return "split_part(otu_id, ';', 1)"
+    elif db_format in ('cbs', 'none'):
+        # "accession|extra" → "accession"
+        return "split_part(otu_id, '|', 1)"
+    else:
+        # silva and others: keep as-is
+        return "otu_id"
+
+
+def _build_taxonomy_split_sql() -> str:
+    """Return DuckDB SQL columns that split a semicolon-separated Taxonomy
+    string into 8 rank columns (Kingdom..Details).
+
+    This replaces _split_taxonomy_series (Python row-by-row apply) with
+    a single vectorized SQL expression evaluated by DuckDB's engine.
+
+    Binomial species logic:
+      - 1 word epithet → prepend Genus (e.g. "melanosporum" → "Genus melanosporum")
+      - >2 words → keep first two, rest to Details
+      - Underscores replaced with spaces (UNITE convention)
+    """
+    # Helper: shorthand for extracting and cleaning the Nth taxonomy part
+    # DuckDB arrays are 1-indexed; COALESCE handles missing parts
+    def _part(n):
+        return f"trim(replace(COALESCE(string_split(Taxonomy, ';')[{n}], ''), '_', ' '))"
+
+    # Count spaces in species = number of words - 1
+    sp = _part(7)
+    sp_nspaces = f"(length({sp}) - length(replace({sp}, ' ', '')))"
+
+    return f"""
+        {_part(1)} AS Kingdom,
+        {_part(2)} AS Phylum,
+        {_part(3)} AS "Class",
+        {_part(4)} AS "Order",
+        {_part(5)} AS Family,
+        {_part(6)} AS Genus,
+        -- Species: ensure binomial
+        CASE
+            WHEN {sp} = '' THEN ''
+            WHEN {sp_nspaces} = 0 AND {_part(6)} != ''
+                THEN {_part(6)} || ' ' || {sp}
+            WHEN {sp_nspaces} >= 2
+                THEN string_split({sp}, ' ')[1] || ' ' || string_split({sp}, ' ')[2]
+            ELSE {sp}
+        END AS Species,
+        -- Details: extra species words + parts beyond rank 7
+        CASE
+            WHEN {sp_nspaces} >= 2 AND array_length(string_split(Taxonomy, ';')) > 7
+                THEN array_to_string(string_split({sp}, ' ')[3:], ' ')
+                     || ';' || array_to_string(string_split(Taxonomy, ';')[8:], ';')
+            WHEN {sp_nspaces} >= 2
+                THEN array_to_string(string_split({sp}, ' ')[3:], ' ')
+            WHEN array_length(string_split(Taxonomy, ';')) > 7
+                THEN array_to_string(string_split(Taxonomy, ';')[8:], ';')
+            ELSE ''
+        END AS Details
+    """
+
+
 def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
                    db_format: str = 'unite'):
     results_path = Path(results_dir)
@@ -97,12 +170,16 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
         "'" + f.replace("'", "''") + "'" for f in clean_files
     ) + "]"
 
-    # --- OPT-5: Taxonomy join inside DuckDB ---
-    # When a taxonomy file is available, perform the join inside DuckDB
-    # before materializing the Python DataFrame — avoids loading the
-    # full taxonomy TSV (500k+ rows for SILVA) into pandas.
+    # --- OPT-A: OTU ID reformatting inside DuckDB ---
+    # Replaces Step 5 (reformat_tmp_indices) entirely
+    reformat_expr = _build_reformat_sql(db_format)
+
+    # --- OPT-5: Taxonomy join + OPT-A split inside DuckDB ---
     tax_path = Path(taxonomy_file) if taxonomy_file else None
     has_tax = tax_path and tax_path.exists()
+
+    # --- OPT-B: Taxonomy split inside DuckDB ---
+    tax_split_sql = _build_taxonomy_split_sql()
 
     if has_tax:
         tax_path_sql = str(tax_path).replace("'", "''")
@@ -112,7 +189,8 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
                 PIVOT (
                     SELECT
                         replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
-                        otu_id, mapped_count
+                        {reformat_expr} AS otu_id,
+                        mapped_count
                     FROM read_csv(
                         {clean_files_sql}, delim='\\t', header=False,
                         columns={col_types_sql}, filename=True
@@ -129,17 +207,24 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
                 '{tax_path_sql}', delim='\\t', header=True,
                 columns={{'OTU_ID': 'VARCHAR', 'Taxonomy': 'VARCHAR'}}
             )
+        ),
+        joined AS (
+            SELECT t.OTU_ID, t.Taxonomy, c.* EXCLUDE (otu_id)
+            FROM taxonomy t
+            INNER JOIN counts c ON t.OTU_ID = c.otu_id
         )
-        SELECT t.OTU_ID, t.Taxonomy, c.* EXCLUDE (otu_id)
-        FROM taxonomy t
-        INNER JOIN counts c ON t.OTU_ID = c.otu_id;
+        SELECT OTU_ID, Taxonomy,
+               {tax_split_sql},
+               j.* EXCLUDE (OTU_ID, Taxonomy)
+        FROM joined j;
         """
     else:
         sql_query = f"""
         PIVOT (
             SELECT
                 replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
-                otu_id, mapped_count
+                {reformat_expr} AS otu_id,
+                mapped_count
             FROM read_csv(
                 {clean_files_sql}, delim='\\t', header=False,
                 columns={col_types_sql}, filename=True
@@ -170,8 +255,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
             return
 
         if has_tax:
-            # DuckDB join may produce duplicate otu_id variants (otu_id, otu_id_1, etc.)
-            # The EXCLUDE clause should prevent this, but drop any leftovers to be safe
+            # DuckDB join may produce duplicate otu_id variants
             otu_id_dupes = [c for c in final_df.columns
                            if c.lower().startswith('otu_id') and c != 'OTU_ID']
             if otu_id_dupes:
@@ -183,15 +267,18 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
 
         # fillna + astype in-place where possible
         final_df = final_df.fillna(0)
-        # Convert only numeric columns to int (skip 'Taxonomy' if present)
         num_cols = final_df.select_dtypes(include='number').columns
         final_df[num_cols] = final_df[num_cols].astype(int)
 
-        # --- Split Taxonomy into 8 rank columns ---
-        if 'Taxonomy' in final_df.columns:
+        # Strip whitespace from taxonomy string columns
+        str_cols = final_df.select_dtypes(include='object').columns
+        for c in str_cols:
+            final_df[c] = final_df[c].str.strip()
+
+        # --- Fallback: split taxonomy in Python if DuckDB didn't produce rank columns ---
+        if 'Taxonomy' in final_df.columns and 'Kingdom' not in final_df.columns:
             print(f"Splitting taxonomy into rank columns (format: {db_format})...")
             rank_df = _split_taxonomy_series(final_df['Taxonomy'], db_format=db_format)
-            # Insert rank columns right after Taxonomy
             for i, col in enumerate(TAXONOMY_RANKS):
                 final_df.insert(
                     final_df.columns.get_loc('Taxonomy') + 1 + i,
@@ -208,22 +295,29 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
 
     except Exception as e:
         print(f"CRITICAL ERROR during DuckDB count aggregation: {e}")
+        import traceback
+        traceback.print_exc()
         return
 
+    # --- OPT-A5: Save TSV first (instant), then XLSX for user convenience ---
+    tsv_output = output_path.with_suffix('.tsv')
+    print(f"Saving final table (TSV) to {tsv_output}...")
+    try:
+        final_df.to_csv(tsv_output, sep='\t')
+        print(f"Final OTU table (TSV) saved to: {tsv_output}")
+    except Exception as e:
+        print(f"WARNING: Error saving TSV file: {e}")
+
     # --- OPT-3: xlsxwriter is 5-15x faster than openpyxl for write-only ---
-    print(f"Saving final table to {output_path}...")
+    print(f"Saving final table (XLSX) to {output_path}...")
     try:
         final_df.to_excel(output_path, engine='xlsxwriter')
-        print(f"Final OTU table (with taxonomy) saved to: {output_path}")
+        print(f"Final OTU table (XLSX) saved to: {output_path}")
     except ImportError:
-        # Fall back to openpyxl if xlsxwriter not installed
         try:
             final_df.to_excel(output_path, engine='openpyxl')
             print(f"Final OTU table saved to: {output_path} (using openpyxl fallback)")
         except ImportError:
-            print("Neither 'xlsxwriter' nor 'openpyxl' found. Saving as CSV.")
-            csv_output = output_path.with_suffix('.csv')
-            final_df.to_csv(csv_output)
-            print(f"Final OTU table saved to: {csv_output}")
+            print("Neither 'xlsxwriter' nor 'openpyxl' found. XLSX skipped (TSV already saved).")
     except Exception as e:
-        print(f"Error saving final file {output_path}: {e}")
+        print(f"WARNING: Error saving XLSX file: {e} (TSV already saved)")

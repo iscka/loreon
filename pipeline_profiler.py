@@ -69,7 +69,8 @@ class PipelineProfiler:
             **metrics
         })
 
-    def save(self, output_dir: Path, db_name: str = None) -> Path:
+    def save(self, output_dir: Path, db_name: str = None,
+             total_threads: int = None, threads_per_job: int = None) -> Path:
         output_dir = Path(output_dir)
         total_wall = round(sum(
             self._steps[n].get('wall_time_s', 0) for n in self._order
@@ -80,6 +81,12 @@ class PipelineProfiler:
             'total_wall_time_s': total_wall,
             'peak_memory_mb': round(self._peak_mem_mb, 1),
         }
+        if total_threads is not None:
+            report['total_threads'] = total_threads
+        if threads_per_job is not None:
+            report['threads_per_job'] = threads_per_job
+            if total_threads and threads_per_job:
+                report['parallel_jobs'] = max(1, total_threads // threads_per_job)
 
         json_path = output_dir / 'performance_report.json'
         with open(json_path, 'w') as f:
@@ -97,6 +104,36 @@ class PipelineProfiler:
     # ------------------------------------------------------------------
     # HTML report (Bootstrap 5 + Plotly, consistent with main report)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _thread_kpi_cards(report: dict) -> str:
+        """Generate KPI cards for thread/parallelism info if available."""
+        cards = []
+        if 'total_threads' in report:
+            cards.append(
+                '<div class="col-md col-sm-6">'
+                '<div class="card kpi-card shadow-sm"><div class="card-body">'
+                f'<div class="kpi-value">{report["total_threads"]}</div>'
+                '<div class="kpi-label">Total Threads</div>'
+                '</div></div></div>'
+            )
+        if 'threads_per_job' in report:
+            cards.append(
+                '<div class="col-md col-sm-6">'
+                '<div class="card kpi-card shadow-sm"><div class="card-body">'
+                f'<div class="kpi-value">{report["threads_per_job"]}</div>'
+                '<div class="kpi-label">Threads per Job</div>'
+                '</div></div></div>'
+            )
+        if 'parallel_jobs' in report:
+            cards.append(
+                '<div class="col-md col-sm-6">'
+                '<div class="card kpi-card shadow-sm"><div class="card-body">'
+                f'<div class="kpi-value">{report["parallel_jobs"]}</div>'
+                '<div class="kpi-label">Parallel Jobs</div>'
+                '</div></div></div>'
+            )
+        return '\n'.join(cards)
 
     def _save_html(self, output_dir: Path, report: dict, db_name: str = None) -> Path:
         run_date = report['run_date']
@@ -269,6 +306,7 @@ class PipelineProfiler:
                     <div class="kpi-label">Pipeline Steps</div>
                 </div></div>
             </div>
+            {self._thread_kpi_cards(report)}
         </div>
 
         <!-- Section 1: Resource Usage -->

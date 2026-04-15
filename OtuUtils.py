@@ -4,9 +4,14 @@ import re
 import subprocess
 from pathlib import Path
 import sys
-import gzip
 import multiprocessing
 from functools import partial
+
+# OPT-A3: isal (Intel ISA-L) is 4-5x faster than stdlib gzip for decompression
+try:
+    from isal import igzip as gzip
+except ImportError:
+    import gzip
 
 
 # ---------------------------------------------------------------------------
@@ -114,8 +119,9 @@ def filter_and_merge_directory(
     reservoir_n = 0
 
     try:
-        with open(good_file_path, 'wt', encoding='utf-8') as f_good, \
-             open(bad_file_path, 'wt', encoding='utf-8') as f_bad:
+        # OPT-A7: 1 MB write buffers for sequential I/O
+        with open(good_file_path, 'wt', encoding='utf-8', buffering=1_048_576) as f_good, \
+             open(bad_file_path, 'wt', encoding='utf-8', buffering=1_048_576) as f_bad:
 
             for file_path in file_list:
                 if debug:
@@ -127,7 +133,9 @@ def filter_and_merge_directory(
 
                 read_open_func = gzip.open if in_is_gzipped else open
 
-                with read_open_func(file_path, 'rt', encoding='utf-8') as f_in:
+                # OPT-A7: Larger read buffer (1 MB) for sequential I/O
+                with read_open_func(file_path, 'rt', encoding='utf-8',
+                                    **({'buffering': 1_048_576} if not in_is_gzipped else {})) as f_in:
                     if is_fastq:
                         for header, seq, plus, qual, seq_len in _iter_fastq_raw(f_in):
                             total_count += 1
@@ -202,25 +210,29 @@ def filter_and_merge_directory(
 
 def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: str,
                      kmer_size: int = 15, window_size: int = 10, debug: bool = False):
+    """OPT-A2: Pipe minimap2 → samtools sort → BAM (eliminates SAM file on disk).
+
+    Returns the path to the sorted BAM file, or None on failure.
+    """
     try:
         fastq_path = Path(fastq_file)
         db_path_obj = Path(db_path)
         output_dir_path = Path(output_dir)
 
-        sam_filename = fastq_path.stem + '.sam'
-        sam_output_path = output_dir_path / sam_filename
+        bam_filename = fastq_path.stem + '_sorted_full.bam'
+        bam_output_path = output_dir_path / bam_filename
         thread_str = str(threads)
 
         if debug:
-            print(f"[{fastq_path.name}] Starting mapping (minimap2)...", flush=True)
+            print(f"[{fastq_path.name}] Starting mapping (minimap2 → BAM pipe)...", flush=True)
             print(f"  DB: {db_path_obj.name}", flush=True)
-            print(f"  Output: {sam_output_path}", flush=True)
+            print(f"  Output: {bam_output_path}", flush=True)
 
     except Exception as e:
         print(f"ERROR in path setup for {fastq_file}: {e}")
         return None
 
-    cmd_list = [
+    cmd_mm2 = [
         'minimap2',
         '-ax', 'map-ont',
         '-t', thread_str,
@@ -230,35 +242,60 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
         str(fastq_path)
     ]
 
+    cmd_sort = [
+        'samtools', 'sort',
+        f'-@{thread_str}',
+        '-o', str(bam_output_path),
+        '-'
+    ]
+
     try:
-        with open(sam_output_path, 'w') as f_sam_out:
-            result = subprocess.run(
-                cmd_list,
-                stdout=f_sam_out,
-                stderr=subprocess.PIPE,
-                check=True,
-                text=True,
-                encoding='utf-8'
+        # OPT-A2: Pipe minimap2 stdout directly to samtools sort
+        # No intermediate SAM file — saves GBs of disk I/O
+        proc_mm2 = subprocess.Popen(
+            cmd_mm2, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc_sort = subprocess.Popen(
+            cmd_sort, stdin=proc_mm2.stdout,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        proc_mm2.stdout.close()  # allow minimap2 to receive SIGPIPE if sort exits
+
+        _, sort_stderr = proc_sort.communicate()
+        mm2_stderr = proc_mm2.stderr.read().decode('utf-8', errors='replace')
+        mm2_rc = proc_mm2.wait()
+
+        if mm2_rc != 0:
+            print(f"ERROR running minimap2 for {fastq_path.name} (rc={mm2_rc}).", flush=True)
+            print(f"Command: {' '.join(cmd_mm2)}", flush=True)
+            if mm2_stderr:
+                print("Stderr:", mm2_stderr.strip(), flush=True)
+            return None
+
+        if proc_sort.returncode != 0:
+            raise subprocess.CalledProcessError(
+                proc_sort.returncode, cmd_sort,
+                stderr=sort_stderr.decode('utf-8', errors='replace')
             )
 
         if debug:
-            print(f"[{fastq_path.name}] Mapping complete.", flush=True)
-            if result.stderr:
+            print(f"[{fastq_path.name}] Mapping + sort complete (BAM pipe).", flush=True)
+            if mm2_stderr:
                 print("  Info (from minimap2 stderr):", flush=True)
-                print(result.stderr.strip(), flush=True)
+                print(mm2_stderr.strip(), flush=True)
 
-        return str(sam_output_path)
+        return str(bam_output_path)
 
     except subprocess.CalledProcessError as e:
-        print(f"ERROR running minimap2 for {fastq_path.name}.", flush=True)
-        print(f"Command: {' '.join(cmd_list)}", flush=True)
-        print("Stderr:", flush=True)
-        print(e.stderr, flush=True)
+        print(f"ERROR running pipeline for {fastq_path.name}.", flush=True)
+        print(f"Command: {e.cmd}", flush=True)
+        if e.stderr:
+            print("Stderr:", e.stderr, flush=True)
         return None
 
     except FileNotFoundError:
-        print("CRITICAL ERROR: 'minimap2' command not found.", flush=True)
-        print("Ensure minimap2 is installed and on your PATH.", flush=True)
+        print("CRITICAL ERROR: 'minimap2' or 'samtools' command not found.", flush=True)
+        print("Ensure both are installed and on your PATH.", flush=True)
         sys.exit(1)
 
     except Exception as e:
@@ -292,14 +329,21 @@ def _parse_flagstat(flagstat_output: str) -> dict:
 def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                       min_percent_identity: float = 0.0, min_ref_coverage: float = 0.0,
                       delete_bam: bool = False):
+    """Process alignment file (BAM or SAM) into OTU count results.
+
+    OPT-A2: Now accepts sorted BAM from piped mapping (no intermediate SAM).
+    OPT-A4: Post-filter stats derived from idxstats (eliminates second flagstat).
+    """
     fname = "unknown"
     filtered_sorted_bam = None
+    input_bam = samfile  # may be BAM from piped mapping or legacy SAM
 
     try:
-        sam_path = Path(samfile)
-        fname = sam_path.stem
+        input_path = Path(input_bam)
+        # Strip _sorted_full suffix if present (from piped mapping)
+        fname = input_path.stem.replace('_sorted_full', '')
 
-        base_dir = sam_path.parent.parent
+        base_dir = input_path.parent.parent
 
         results_dir = base_dir / 'tabeling' / 'results'
         tab_dir = base_dir / 'tabeling'
@@ -347,10 +391,10 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
     }
 
     try:
-        # --- OPT-2: Get pre-filter stats from SAM directly (no intermediate BAM) ---
-        # 1) samtools flagstat on the raw SAM → total & mapped counts
+        # --- Step 1: Pre-filter stats via flagstat on input BAM ---
+        # (Fast on BAM; much faster than old approach on SAM text)
         result_flagstat_raw = subprocess.run(
-            ['samtools', 'flagstat', f'-@{thread_str}', samfile],
+            ['samtools', 'flagstat', f'-@{thread_str}', input_bam],
             check=True, capture_output=True, text=True, encoding='utf-8'
         )
         stats_raw = _parse_flagstat(result_flagstat_raw.stdout)
@@ -366,11 +410,10 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         if debug:
             print(f"[{fname}] Pre-filter: total={stats_raw['total']}, mapped={stats_raw['mapped']}", flush=True)
 
-        # 2) SAM → filter -F 0x904 + quality expr → sort → filtered BAM
-        #    Uses Popen pipe instead of shell=True for cross-platform safety
+        # --- Step 2: Filter -F 0x904 + quality → sort → filtered BAM ---
         cmd_view = [
-            'samtools', 'view', f'-@{thread_str}', '-bS', '-F', '0x904',
-        ] + e_filter_args + [samfile]
+            'samtools', 'view', f'-@{thread_str}', '-b', '-F', '0x904',
+        ] + e_filter_args + [input_bam]
         cmd_sort = [
             'samtools', 'sort', f'-@{thread_str}', '-o', str(filtered_sorted_bam), '-',
         ]
@@ -388,47 +431,44 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         if proc_sort.returncode != 0:
             raise subprocess.CalledProcessError(proc_sort.returncode, cmd_sort, stderr=sort_stderr)
 
-        # 3) Index the filtered BAM
+        # --- Step 3: Index the filtered BAM ---
         subprocess.run(['samtools', 'index', f'-@{thread_str}', str(filtered_sorted_bam)],
                        check=True, capture_output=True)
 
-        # 4) Flagstat on filtered BAM → post-quality-filter counts
-        result_flagstat2 = subprocess.run(
-            ['samtools', 'flagstat', f'-@{thread_str}', str(filtered_sorted_bam)],
-            check=True, capture_output=True, text=True, encoding='utf-8'
-        )
-        stats2 = _parse_flagstat(result_flagstat2.stdout)
-        mapping_stats['mapped_filtered'] = stats2['mapped']
-        if stats_raw['mapped'] > 0:
-            mapping_stats['quality_retention_pct'] = round(
-                stats2['mapped'] / stats_raw['mapped'] * 100, 2
-            )
-
-        # Compute ll2 (unmapped after filter) from flagstat
-        ll2_unmapped = stats2['total'] - stats2['mapped'] if stats2['total'] > 0 else 0
-        # For the filtered BAM, the "total" from flagstat includes only reads that
-        # passed the -F 0x904 + quality filter. All reads in this BAM are "mapped"
-        # by definition (we filtered with -F 0x904), so ll2 unmapped = 0.
-        ll2 = f"*\t0\t0\t{ll2_unmapped}"
-
-        if debug:
-            print(f"[{fname}] Post-filter: mapped={stats2['mapped']}", flush=True)
-
-        # 5) idxstats → results file (only rows with mapped_count != 0)
+        # --- Step 4: idxstats → results file + derive post-filter stats ---
+        # OPT-A4: Replaces second flagstat call — derive mapped_filtered from
+        # the sum of idxstats column 3 (mapped reads per reference)
         result_idxstats = subprocess.run(
             ['samtools', 'idxstats', f'-@{thread_str}', str(filtered_sorted_bam)],
             check=True, capture_output=True, text=True, encoding='utf-8'
         )
+
+        total_mapped_filtered = 0
+        unmapped_in_filtered = 0
         with open(results_file, 'w', encoding='utf-8') as f:
             for line in result_idxstats.stdout.splitlines():
                 parts = line.strip().split('\t')
-                if len(parts) >= 3 and parts[0] != '*' and parts[2] != '0':
+                if not parts or not parts[0]:
+                    continue
+                if parts[0] == '*':
+                    # Capture unmapped count from idxstats * line
+                    unmapped_in_filtered = int(parts[3]) if len(parts) >= 4 else 0
+                    continue
+                if len(parts) >= 3 and parts[2] != '0':
+                    total_mapped_filtered += int(parts[2])
                     f.write(line.strip() + '\n')
-            # Append unmapped counts
+            # Append unmapped counts for backward compatibility
             f.write(ll1 + '\n')
-            f.write(ll2 + '\n')
+            f.write(f"*\t0\t0\t{unmapped_in_filtered}\n")
+
+        mapping_stats['mapped_filtered'] = total_mapped_filtered
+        if stats_raw['mapped'] > 0:
+            mapping_stats['quality_retention_pct'] = round(
+                total_mapped_filtered / stats_raw['mapped'] * 100, 2
+            )
 
         if debug:
+            print(f"[{fname}] Post-filter: mapped={total_mapped_filtered} (from idxstats)", flush=True)
             print(f"--- [Tabeling: {fname}] Complete ---", flush=True)
 
         return mapping_stats
@@ -446,14 +486,15 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         sys.exit(1)
 
     finally:
-        # OPT-14 / Delete BAM: optionally clean up filtered BAM and SAM
+        # OPT-14 / Delete BAM: clean up intermediate BAM files
         if delete_bam:
             for p in [filtered_sorted_bam,
                       Path(f"{filtered_sorted_bam}.bai") if filtered_sorted_bam else None,
-                      Path(samfile)]:
-                if p and p.exists():
+                      Path(input_bam),
+                      Path(f"{input_bam}.bai") if Path(f"{input_bam}.bai").exists() else None]:
+                if p and Path(p).exists():
                     try:
-                        p.unlink()
+                        Path(p).unlink()
                     except Exception:
                         pass
 

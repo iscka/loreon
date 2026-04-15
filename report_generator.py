@@ -254,9 +254,16 @@ def load_data(filter_path, otu_path):
         print(f"ERROR: Cannot read filter file: {e}", file=sys.stderr)
         sys.exit(1)
 
+    # OPT-A5: Prefer TSV (faster to load) over XLSX when available
+    otu_path_obj = Path(otu_path)
+    tsv_otu_path = otu_path_obj.with_suffix('.tsv')
     print(f"Loading OTU table from: {otu_path}")
     try:
-        df_otu = pd.read_excel(otu_path, index_col=0)
+        if tsv_otu_path.exists():
+            print(f"  (Using TSV format: {tsv_otu_path.name})")
+            df_otu = pd.read_csv(tsv_otu_path, sep='\t', index_col=0)
+        else:
+            df_otu = pd.read_excel(otu_path, index_col=0)
     except FileNotFoundError:
         print(f"WARNING: OTU file not found: {otu_path}. "
               "Report will be generated without metagenomic section.")

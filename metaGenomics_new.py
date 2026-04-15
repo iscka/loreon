@@ -16,7 +16,6 @@ try:
         filter_and_merge_directory,
         mapping_improved,
         tabeling_improved,
-        reformat_tmp_indices,
         _parse_fasta_headers
     )
     from ResultsReader import makeOtu_duckdb
@@ -459,29 +458,13 @@ def main():
                           failed=len(fastq_files_to_process) - success_count_p)
 
     # =======================================================================
-    # STEP 5: Reformat
+    # STEP 5: OTU Aggregation
+    # (OPT-A1: Step 5 "Reformat" eliminated — DuckDB handles OTU ID
+    #  reformatting via _build_reformat_sql() inside the PIVOT query)
     # =======================================================================
     if profiler:
-        profiler.start_step('Step 5: Reformat')
-    print("\n--- STEP 5: Index Reformatting ---")
-    try:
-        reformat_tmp_indices(
-            results_dir=str(results_dir),
-            format=options.format,
-            debug=options.debug
-        )
-    except Exception as e:
-        print(f"ERROR during index reformatting: {e}")
-
-    if profiler:
-        profiler.end_step('Step 5: Reformat')
-
-    # =======================================================================
-    # STEP 6: OTU Aggregation
-    # =======================================================================
-    if profiler:
-        profiler.start_step('Step 6: OTU Aggregation')
-    print("\n--- STEP 6: Results Aggregation ---")
+        profiler.start_step('Step 5: OTU Aggregation')
+    print("\n--- STEP 5: Results Aggregation ---")
 
     try:
         makeOtu_duckdb(
@@ -494,8 +477,10 @@ def main():
         print(f"ERROR during final aggregation: {e}")
 
     if profiler:
-        profiler.end_step('Step 6: OTU Aggregation')
-        profiler.save(output_dir, db_name=db_name)
+        profiler.end_step('Step 5: OTU Aggregation')
+        profiler.save(output_dir, db_name=db_name,
+                      total_threads=options.total_threads,
+                      threads_per_job=options.threads_per_job)
 
     print(f"\n--- Pipeline Complete ---")
     print(f"OTU table saved to: {final_output_file.name}")
