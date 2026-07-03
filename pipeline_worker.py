@@ -4,7 +4,7 @@ import os
 import signal
 from pathlib import Path
 
-from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
+from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer
 
 from venv_manager import get_venv_python
 
@@ -106,6 +106,8 @@ class PipelineWorker(QObject):
             cmd.append("--profile")
         if self.settings.get("delete_bam", False):
             cmd.append("--delete-bam")
+        if self.settings.get("flat_sh", False):
+            cmd.append("--flat-sh")
         return cmd
 
     def _report_names(self):
@@ -271,28 +273,71 @@ class PipelineWorker(QObject):
 
     @pyqtSlot()
     def stop(self):
-        if self.is_running:
-            self.is_running = False
-            if self.process:
-                self.log_signal.emit("--- STOPPING PIPELINE (killing process tree) ---")
-                try:
-                    if sys.platform == 'win32':
-                        subprocess.run(
-                            ['taskkill', '/F', '/T', '/PID', str(self.process.pid)],
-                            capture_output=True
-                        )
-                    else:
-                        os.killpg(os.getpgid(self.process.pid), signal.SIGTERM)
-                except (ProcessLookupError, AttributeError):
-                    pass
-                except OSError:
-                    try:
-                        self.process.terminate()
-                    except Exception:
-                        pass
-                except Exception as e:
-                    self.log_signal.emit(f"Error during stop: {e}")
-            else:
-                self.log_signal.emit("--- Request Interrupt (no process active) ---")
-        else:
+        """Stop the pipeline. Invoked via Qt.DirectConnection so this runs on
+        the GUI thread even while the worker thread is blocked in a readline
+        loop inside run_process().
+
+        Strategy: send SIGTERM to the whole process group (so minimap2,
+        samtools and mp.Pool workers all receive it), then escalate to
+        SIGKILL after 3 s if the tree is still alive — multiprocessing
+        workers blocked on subprocess.communicate() do not always react to
+        SIGTERM in time.
+        """
+        if not self.is_running:
             self.log_signal.emit("--- Request Interrupt (not running) ---")
+            return
+
+        self.is_running = False
+        proc = self.process  # snapshot (worker thread may null it)
+        if proc is None:
+            self.log_signal.emit("--- Request Interrupt (no process active) ---")
+            return
+
+        self.log_signal.emit("--- STOPPING PIPELINE (killing process tree) ---")
+        pid = proc.pid
+
+        if sys.platform == 'win32':
+            try:
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(pid)],
+                    capture_output=True
+                )
+            except Exception as e:
+                self.log_signal.emit(f"Error during stop (taskkill): {e}")
+            return
+
+        # POSIX: send SIGTERM to the process group, then SIGKILL after a grace period
+        try:
+            pgid = os.getpgid(pid)
+        except (ProcessLookupError, OSError):
+            return
+
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            return
+        except Exception as e:
+            self.log_signal.emit(f"Error during stop (SIGTERM): {e}")
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+            return
+
+        def _force_kill():
+            # Escalation: if the tree is still alive after 3 s, send SIGKILL.
+            try:
+                os.killpg(pgid, 0)  # probe (0 = no-op, raises if dead)
+            except (ProcessLookupError, OSError):
+                return              # already dead, nothing to do
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+                self.log_signal.emit(
+                    "--- SIGKILL sent (process tree did not exit on SIGTERM) ---"
+                )
+            except (ProcessLookupError, OSError):
+                pass
+
+        # Runs on the GUI thread (same thread that called stop via
+        # DirectConnection), so QTimer has a live event loop.
+        QTimer.singleShot(3000, _force_kill)

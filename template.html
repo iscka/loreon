@@ -212,7 +212,7 @@
             </div>
         </div>
 
-        <h2>Section {% if mapping_kpis %}3{% else %}2{% endif %}: Metagenomic Analysis</h2>
+        <h2>Section {% if mapping_kpis %}3{% else %}2{% endif %}: Abbundaces</h2>
 
         {% if kpis.has_otu_data %}
         <div class="card shadow-sm">
@@ -306,12 +306,29 @@
             const filteredData = allGraphData.filter(d => d.Rank === rank);
             const groups = [...new Set(filteredData.map(d => d.Taxonomy))];
 
+            // Mean relative abundance per taxon across samples — shown next
+            // to the taxon name in the legend so readers can quickly rank
+            // taxa without having to sum stacks by eye.
+            const nSamples = new Set(filteredData.map(d => d.Sample)).size || 1;
+            const meanPct = {};
+            groups.forEach(g => {
+                const sum = filteredData
+                    .filter(d => d.Taxonomy === g)
+                    .reduce((acc, d) => acc + (d['Relative Abundance (%)'] || 0), 0);
+                meanPct[g] = sum / nSamples;
+            });
+
+            // Sort legend by mean abundance (descending) so dominant taxa
+            // appear at the top.
+            groups.sort((a, b) => meanPct[b] - meanPct[a]);
+
             const traces = groups.map(groupName => {
                 const groupData = filteredData.filter(d => d.Taxonomy === groupName);
+                const pctLabel = meanPct[groupName].toFixed(1) + '%';
                 return {
                     x: groupData.map(d => d.Sample),
                     y: groupData.map(d => d['Relative Abundance (%)']),
-                    name: groupName,
+                    name: `${groupName} (${pctLabel})`,
                     type: 'bar'
                 };
             });

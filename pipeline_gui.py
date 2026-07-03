@@ -266,6 +266,13 @@ class MainWindow(QMainWindow):
             "to free disk space. The OTU results are NOT affected."
         )
         options_left_layout.addWidget(self.delete_bam_check)
+        self.flat_sh_check = QCheckBox("Flat SH (UNITE only)")
+        self.flat_sh_check.setToolTip(
+            "UNITE only: collapse reference accessions that share the same\n"
+            "Species Hypothesis (SH) code into a single OTU row.\n"
+            "Ignored for other database formats."
+        )
+        options_left_layout.addWidget(self.flat_sh_check)
         options_layout.addLayout(options_left_layout)
 
         filter_box = QGroupBox("Read & Alignment Filter")
@@ -450,7 +457,11 @@ class MainWindow(QMainWindow):
         self.worker = PipelineWorker()
         self.worker.moveToThread(self.worker_thread)
         self.start_pipeline_signal.connect(self.worker.run)
-        self.stop_pipeline_signal.connect(self.worker.stop)
+        # DirectConnection: stop() must run on the GUI thread, because the
+        # worker thread is blocked inside a readline() loop in run() and
+        # its event loop does not dispatch queued slots until run() returns.
+        # A queued stop() would never fire while the pipeline is mapping.
+        self.stop_pipeline_signal.connect(self.worker.stop, Qt.DirectConnection)
         self.worker.log_signal.connect(self.append_log)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.finished_signal.connect(self.pipeline_finished)
@@ -582,6 +593,7 @@ class MainWindow(QMainWindow):
             "force_tax_map": self.force_tax_map_check.isChecked(),
             "profile": self.profile_check.isChecked(),
             "delete_bam": self.delete_bam_check.isChecked(),
+            "flat_sh": self.flat_sh_check.isChecked(),
             "use_docker": use_docker,
         }
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
@@ -647,7 +659,7 @@ class MainWindow(QMainWindow):
                        self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
                        self.force_tax_map_check, self.profile_check,
-                       self.delete_bam_check, self.docker_check,
+                       self.delete_bam_check, self.flat_sh_check, self.docker_check,
                        self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
 

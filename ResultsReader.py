@@ -72,16 +72,23 @@ def _split_taxonomy_series(taxonomy_series: pd.Series, db_format: str = 'unite')
     )
 
 
-def _build_reformat_sql(db_format: str) -> str:
+def _build_reformat_sql(db_format: str, flat_sh: bool = False) -> str:
     """Return a DuckDB SQL expression that extracts the canonical OTU_ID
     from the raw index column, matching the logic in reformat_tmp_indices.
 
     This replaces Step 5 (reformat_tmp_indices) entirely — the OTU ID
     reformatting now happens inside the DuckDB query, avoiding a full
     read-write cycle on every .tmp.txt file.
+
+    flat_sh (UNITE only): collapse rows to the SH species hypothesis code,
+    so multiple reference accessions sharing the same SH become a single
+    OTU row.
     """
     if db_format == 'unite':
-        # "SH1234567.08FU|reps|Fungi|..." → "reps|Fungi" (parts[1]|parts[2])
+        if flat_sh:
+            # "species|accession|SH|refs|tax" → "SH" (parts[2])
+            return "split_part(otu_id, '|', 3)"
+        # "species|accession|SH|refs|tax" → "accession|SH" (parts[1]|parts[2])
         return ("split_part(otu_id, '|', 2) || '|' || split_part(otu_id, '|', 3)")
     elif db_format == 'eukariome':
         # "accession;taxonomy..." → "accession"
@@ -146,13 +153,20 @@ def _build_taxonomy_split_sql() -> str:
 
 
 def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
-                   db_format: str = 'unite'):
+                   db_format: str = 'unite', flat_sh: bool = False):
     results_path = Path(results_dir)
     output_path = Path(output_file)
 
     input_glob_pattern = str(results_path / '*.tmp.txt')
     all_files_raw = glob.glob(input_glob_pattern)
-    clean_files = [f for f in all_files_raw if not Path(f).name.startswith('._')]
+    # OPT-B4: normalise backslashes to forward slashes so that the
+    # DuckDB `split_part(filename, '/', -1)` expression below extracts the
+    # sample name correctly on Windows (native, non-Docker) runs.
+    clean_files = [
+        f.replace('\\', '/')
+        for f in all_files_raw
+        if not Path(f).name.startswith('._')
+    ]
 
     if not clean_files:
         print(f"No valid .tmp.txt files found in {results_dir}")
@@ -172,7 +186,14 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
 
     # --- OPT-A: OTU ID reformatting inside DuckDB ---
     # Replaces Step 5 (reformat_tmp_indices) entirely
-    reformat_expr = _build_reformat_sql(db_format)
+    # OPT-B7: optional UNITE Flat-SH aggregation (collapses ref accessions
+    # that share the same Species Hypothesis into a single OTU row).
+    use_flat_sh = flat_sh and db_format == 'unite'
+    reformat_expr = _build_reformat_sql(db_format, flat_sh=use_flat_sh)
+    if flat_sh and not use_flat_sh:
+        print(f"[Flat-SH] Ignored: only applies to db_format='unite' (current: {db_format})")
+    elif use_flat_sh:
+        print("[Flat-SH] UNITE references grouped by SH species hypothesis.")
 
     # --- OPT-5: Taxonomy join + OPT-A split inside DuckDB ---
     tax_path = Path(taxonomy_file) if taxonomy_file else None
@@ -183,6 +204,27 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
 
     if has_tax:
         tax_path_sql = str(tax_path).replace("'", "''")
+
+        # Taxonomy CTE — when Flat-SH is active, project OTU_ID to the SH code
+        # (= second pipe-separated field of the cached tax-map key "acc|SH")
+        # and dedupe, so multiple accessions sharing an SH collapse to one row.
+        tax_read_csv = (
+            "read_csv('" + tax_path_sql + "', delim='\\t', header=True, "
+            "columns={'OTU_ID': 'VARCHAR', 'Taxonomy': 'VARCHAR'})"
+        )
+        if use_flat_sh:
+            taxonomy_cte_sql = (
+                "taxonomy AS (\n"
+                "    SELECT split_part(OTU_ID, '|', 2) AS OTU_ID,\n"
+                "           any_value(Taxonomy) AS Taxonomy\n"
+                "    FROM " + tax_read_csv + "\n"
+                "    WHERE split_part(OTU_ID, '|', 2) != ''\n"
+                "    GROUP BY split_part(OTU_ID, '|', 2)\n"
+                ")"
+            )
+        else:
+            taxonomy_cte_sql = "taxonomy AS (SELECT * FROM " + tax_read_csv + ")"
+
         sql_query = f"""
         WITH counts AS (
             SELECT * FROM (
@@ -202,12 +244,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
                 GROUP BY otu_id
             )
         ),
-        taxonomy AS (
-            SELECT * FROM read_csv(
-                '{tax_path_sql}', delim='\\t', header=True,
-                columns={{'OTU_ID': 'VARCHAR', 'Taxonomy': 'VARCHAR'}}
-            )
-        ),
+        {taxonomy_cte_sql},
         joined AS (
             SELECT t.OTU_ID, t.Taxonomy, c.* EXCLUDE (otu_id)
             FROM taxonomy t

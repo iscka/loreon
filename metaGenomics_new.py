@@ -55,6 +55,17 @@ def parse_arguments():
         "-max", "--max_len", help="Maximum length.",
         type=int, default=300
     )
+    filter_group.add_argument(
+        "--preset",
+        help="Amplicon preset: sets min/max length to reasonable defaults "
+             "for common markers. Overrides -min/-max if they are at their "
+             "default values. Available: its1, its2, its-full, 16s-v3v4, "
+             "16s-full, 18s-v9, 18s-v4.",
+        type=str,
+        choices=['its1', 'its2', 'its-full', '16s-v3v4', '16s-full',
+                 '18s-v9', '18s-v4'],
+        default=None
+    )
     perf_group = parser.add_argument_group('Performance Parameters')
     perf_group.add_argument(
         "-T", "--total_threads", help="Total CPU threads.",
@@ -82,8 +93,10 @@ def parse_arguments():
     )
     quality_group.add_argument(
         "--min-ref-coverage",
-        help="Minimum reference coverage for an alignment to be kept (0 = disabled). "
-             "E.g. 90 means the alignment must cover ≥90%% of the reference sequence.",
+        help="Minimum query coverage: percentage of the read that must be aligned "
+             "(0 = disabled). E.g. 90 means ≥90%% of the read's length aligned "
+             "(alen/qlen). Note: flag name kept for backward compatibility; the "
+             "previous 'ref coverage' semantics were incorrect for ONT reads.",
         type=float, default=90.0, metavar="PCT"
     )
     other_group = parser.add_argument_group('Other')
@@ -104,6 +117,18 @@ def parse_arguments():
     other_group.add_argument(
         "--delete-bam",
         help="Delete BAM and SAM files after tabeling to free disk space.",
+        action="store_true"
+    )
+    other_group.add_argument(
+        "--gzip-intermediate",
+        help="Write merged FASTQ files as .fastq.gz (halves disk usage on "
+             "large ONT runs; minimap2 reads gz natively).",
+        action="store_true"
+    )
+    other_group.add_argument(
+        "--flat-sh",
+        help="UNITE only: aggregate OTU rows by SH species hypothesis "
+             "(collapse multiple reference accessions sharing the same SH).",
         action="store_true"
     )
     return parser.parse_args()
@@ -170,6 +195,27 @@ def main():
 
     options = parse_arguments()
     print("--- Metagenomic Pipeline Start (v2.7 Optimized) ---")
+
+    # Apply amplicon preset — only when the user left min/max at defaults,
+    # so that explicit -min/-max always win.
+    _PRESETS = {
+        'its1':     (150, 350),
+        'its2':     (150, 400),
+        'its-full': (400, 900),
+        '16s-v3v4': (380, 530),
+        '16s-full': (1200, 1700),
+        '18s-v9':   (100, 220),
+        '18s-v4':   (350, 550),
+    }
+    if options.preset:
+        p_min, p_max = _PRESETS[options.preset]
+        if options.min_len == 200 and options.max_len == 300:
+            options.min_len, options.max_len = p_min, p_max
+            print(f"[PRESET] Applied '{options.preset}': min_len={p_min}, max_len={p_max}")
+        else:
+            print(f"[PRESET] '{options.preset}' requested but min_len/max_len "
+                  f"already customised — keeping user values.")
+
     check_dependencies()
 
     profiler = None
@@ -283,7 +329,8 @@ def main():
         min_len=options.min_len,
         max_len=options.max_len,
         out_dir=output_dir,
-        debug=options.debug
+        debug=options.debug,
+        gzip_intermediate=options.gzip_intermediate
     )
 
     filter_stats_list = []
@@ -472,6 +519,7 @@ def main():
             output_file=str(final_output_file),
             taxonomy_file=str(generated_tax_map_path),
             db_format=options.format,
+            flat_sh=options.flat_sh,
         )
     except Exception as e:
         print(f"ERROR during final aggregation: {e}")

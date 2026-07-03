@@ -79,7 +79,8 @@ def filter_and_merge_directory(
     min_len: int,
     max_len: int,
     out_dir: Path,
-    debug: bool = False
+    debug: bool = False,
+    gzip_intermediate: bool = False
 ):
     dir_name = input_dir.name
 
@@ -97,7 +98,12 @@ def filter_and_merge_directory(
             print(f"  [Filter {dir_name}] No source files found. Skipping.")
         return None
 
-    print(f"  [Filter {dir_name}] Merging {len(file_list)} files into '{dir_name}.fastq'...", flush=True)
+    # OPT-B5: optional on-the-fly gzip of merged intermediates — halves disk
+    # usage for large ONT runs. minimap2 reads .gz natively, so downstream
+    # mapping is unaffected.
+    out_suffix = '.fastq.gz' if gzip_intermediate else '.fastq'
+
+    print(f"  [Filter {dir_name}] Merging {len(file_list)} files into '{dir_name}{out_suffix}'...", flush=True)
 
     try:
         good_dir = out_dir / 'good_seq'
@@ -105,7 +111,7 @@ def filter_and_merge_directory(
         good_dir.mkdir(parents=True, exist_ok=True)
         bad_dir.mkdir(parents=True, exist_ok=True)
 
-        base_name = dir_name + '.fastq'
+        base_name = dir_name + out_suffix
         good_file_path = good_dir / base_name
         bad_file_path = bad_dir / base_name
 
@@ -118,10 +124,16 @@ def filter_and_merge_directory(
     reservoir = []
     reservoir_n = 0
 
+    def _open_out(path):
+        # isal.igzip.open is used when available (imported as `gzip`)
+        if gzip_intermediate:
+            return gzip.open(path, 'wt', encoding='utf-8', compresslevel=3)
+        return open(path, 'wt', encoding='utf-8', buffering=1_048_576)
+
     try:
-        # OPT-A7: 1 MB write buffers for sequential I/O
-        with open(good_file_path, 'wt', encoding='utf-8', buffering=1_048_576) as f_good, \
-             open(bad_file_path, 'wt', encoding='utf-8', buffering=1_048_576) as f_bad:
+        # OPT-A7: 1 MB write buffers for sequential I/O (uncompressed only)
+        with _open_out(good_file_path) as f_good, \
+             _open_out(bad_file_path) as f_bad:
 
             for file_path in file_list:
                 if debug:
@@ -219,7 +231,14 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
         db_path_obj = Path(db_path)
         output_dir_path = Path(output_dir)
 
-        bam_filename = fastq_path.stem + '_sorted_full.bam'
+        # OPT-B5: strip both `.gz` and `.fastq`/`.fq` so that BAM names
+        # (and downstream sample names) remain `barcodeXX_sorted_full.bam`
+        # regardless of whether the input is gzipped.
+        fastq_stem = fastq_path.name
+        for suffix in ('.gz', '.fastq', '.fq'):
+            if fastq_stem.lower().endswith(suffix):
+                fastq_stem = fastq_stem[: -len(suffix)]
+        bam_filename = fastq_stem + '_sorted_full.bam'
         bam_output_path = output_dir_path / bam_filename
         thread_str = str(threads)
 
@@ -232,9 +251,14 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
         print(f"ERROR in path setup for {fastq_file}: {e}")
         return None
 
+    # OPT-B2: `--secondary=no` suppresses secondary alignments upstream.
+    # Previously minimap2 emitted up to 5 secondary per read and they were
+    # all discarded later by `samtools view -F 0x904`, wasting I/O and
+    # BAM size (~20-30%). Disable them at the source.
     cmd_mm2 = [
         'minimap2',
         '-ax', 'map-ont',
+        '--secondary=no',
         '-t', thread_str,
         '-k', str(kmer_size),
         '-w', str(window_size),
@@ -364,6 +388,14 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         return None
 
     # Build optional samtools -e expression for quality filters
+    # NOTE (OPT-B1): coverage is now computed as QUERY coverage (alen/qlen).
+    # The previous formula `alen*100>=X*rlen` was semantically wrong: in
+    # htslib filter expressions `rlen` is the reference consumption of THIS
+    # alignment (M+D from CIGAR), not the full reference length — so the
+    # ratio measured insertion/deletion balance rather than "% of reference
+    # covered". Query coverage (fraction of the read that actually aligned,
+    # excluding soft clips) is the meaningful quantity for metabarcoding
+    # amplicons: reads should align ≥90% of their own length.
     quality_conditions = []
     if min_percent_identity > 0.0:
         quality_conditions.append(
@@ -371,7 +403,7 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         )
     if min_ref_coverage > 0.0:
         quality_conditions.append(
-            f"alen*100>={min_ref_coverage}*rlen"
+            f"alen*100>={min_ref_coverage}*qlen"
         )
     e_filter_args = []          # list form for Popen (cross-platform safe)
     if quality_conditions:
@@ -445,6 +477,8 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
 
         total_mapped_filtered = 0
         unmapped_in_filtered = 0
+        # OPT-B6: collect per-reference counts for QC stats in mapping_stats.json
+        per_ref_counts = []
         with open(results_file, 'w', encoding='utf-8') as f:
             for line in result_idxstats.stdout.splitlines():
                 parts = line.strip().split('\t')
@@ -455,7 +489,9 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                     unmapped_in_filtered = int(parts[3]) if len(parts) >= 4 else 0
                     continue
                 if len(parts) >= 3 and parts[2] != '0':
-                    total_mapped_filtered += int(parts[2])
+                    ref_count = int(parts[2])
+                    total_mapped_filtered += ref_count
+                    per_ref_counts.append((parts[0], ref_count))
                     f.write(line.strip() + '\n')
             # Append unmapped counts for backward compatibility
             f.write(ll1 + '\n')
@@ -466,6 +502,36 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
             mapping_stats['quality_retention_pct'] = round(
                 total_mapped_filtered / stats_raw['mapped'] * 100, 2
             )
+
+        # OPT-B6: per-reference QC summary — helps diagnose over/under-represented
+        # references in metabarcoding runs (e.g. a single SH capturing 80% of reads)
+        mapping_stats['references_detected'] = len(per_ref_counts)
+        if per_ref_counts:
+            counts_only = sorted((c for _, c in per_ref_counts), reverse=True)
+            top = sorted(per_ref_counts, key=lambda x: -x[1])[:10]
+            # Percentiles computed from sorted-descending list
+            n = len(counts_only)
+
+            def _pct(p):
+                # p in [0,100]; 50 = median, 95 = top-5% threshold
+                idx = min(n - 1, max(0, int(round((1 - p / 100.0) * (n - 1)))))
+                return counts_only[idx]
+
+            top_count = counts_only[0]
+            top_share = round(top_count / total_mapped_filtered * 100, 2) if total_mapped_filtered else 0.0
+            mapping_stats['per_ref'] = {
+                'top10': [{'ref': r, 'count': c} for r, c in top],
+                'top_ref_share_pct': top_share,
+                'median_count_per_ref': _pct(50),
+                'p95_count_per_ref': _pct(95),
+                'singleton_refs': sum(1 for c in counts_only if c == 1),
+            }
+        else:
+            mapping_stats['per_ref'] = {
+                'top10': [], 'top_ref_share_pct': 0.0,
+                'median_count_per_ref': 0, 'p95_count_per_ref': 0,
+                'singleton_refs': 0,
+            }
 
         if debug:
             print(f"[{fname}] Post-filter: mapped={total_mapped_filtered} (from idxstats)", flush=True)
@@ -706,15 +772,30 @@ def create_taxonomy_map_from_fasta(
             print(f"CRITICAL ERROR: Cannot create forced map: {e}")
             sys.exit(1)
 
+    # OPT-B3: invalidate cache if the source FASTA is newer than the cached
+    # taxonomy map — previously, updating UNITE/SILVA while keeping the same
+    # filename silently reused the stale map, producing wrong taxonomy.
+    def _cache_is_fresh(cache_path: Path) -> bool:
+        try:
+            return cache_path.stat().st_mtime >= fasta_path.stat().st_mtime
+        except OSError:
+            return False
+
     if db_map_path.exists():
-        print(f"Taxonomy map found (Cache DB): {db_map_path}")
-        count = sum(1 for _ in open(db_map_path, encoding='utf-8')) - 1
-        return db_map_path, count
+        if _cache_is_fresh(db_map_path):
+            print(f"Taxonomy map found (Cache DB): {db_map_path}")
+            count = sum(1 for _ in open(db_map_path, encoding='utf-8')) - 1
+            return db_map_path, count
+        else:
+            print(f"Taxonomy map stale (FASTA newer than cache): {db_map_path} — regenerating")
 
     if output_map_path.exists():
-        print(f"Taxonomy map found (Cache Output): {output_map_path}")
-        count = sum(1 for _ in open(output_map_path, encoding='utf-8')) - 1
-        return output_map_path, count
+        if _cache_is_fresh(output_map_path):
+            print(f"Taxonomy map found (Cache Output): {output_map_path}")
+            count = sum(1 for _ in open(output_map_path, encoding='utf-8')) - 1
+            return output_map_path, count
+        else:
+            print(f"Taxonomy map stale (FASTA newer than cache): {output_map_path} — regenerating")
 
     print("Taxonomy map not found in cache. Creating (may take time)...")
 
