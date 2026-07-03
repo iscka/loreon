@@ -1,0 +1,4 @@
+dist_windows/** export-ignore
+windows_setup/** export-ignore
+LOREON*.spec export-ignore
+.gitattributes export-ignore

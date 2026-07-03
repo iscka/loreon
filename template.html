@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ project_name }}</title>
+
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+
+    <link href="https://cdn.datatables.net/2.0.8/css/dataTables.bootstrap5.min.css" rel="stylesheet">
+
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+
+    <style>
+        body { background-color: #f8f9fa; }
+        .container { max-width: 1400px; }
+        .card { margin-bottom: 1.5rem; }
+        .kpi-card { text-align: center; }
+        .kpi-value { font-size: 2.5rem; font-weight: bold; }
+        .kpi-label { font-size: 1rem; color: #6c757d; }
+        h1, h2 { border-bottom: 2px solid #dee2e6; padding-bottom: 10px; margin-top: 1.5rem; }
+
+        /* Wrapper div for horizontal table scrolling */
+        .table-wrapper {
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+
+        /* Left-align all table header cells */
+        .table th {
+            text-align: left !important;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container mt-4">
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                <h1 class="display-5">{{ project_name }}</h1>
+                <p class="lead">Report generated on: {{ report_date }}</p>
+            </div>
+        </div>
+
+        {% if analysis_params %}
+        <div class="card shadow-sm border-start border-4 border-primary">
+            <div class="card-body py-2">
+                <div class="d-flex flex-wrap align-items-center gap-4">
+                    <strong class="text-primary">Analysis Parameters:</strong>
+
+                    {# --- Length Filter --- #}
+                    {% if analysis_params.len_filter_active is not none %}
+                        {% if analysis_params.len_filter_active %}
+                        <span>
+                            <i class="text-success">&#10003;</i> Length Filter:
+                            <strong>{{ analysis_params.min_len }}</strong> &ndash; <strong>{{ analysis_params.max_len }}</strong> bp
+                        </span>
+                        {% else %}
+                        <span>
+                            <i class="text-secondary">&#10007;</i> Length Filter: <span class="text-muted">Disabled</span>
+                        </span>
+                        {% endif %}
+                    {% endif %}
+
+                    {# --- Quality Filter --- #}
+                    {% if analysis_params.quality_filter_active %}
+                    <span>
+                        <i class="text-success">&#10003;</i> Quality Filter:
+                        {% if analysis_params.min_percent_identity > 0 %}
+                            Identity &ge; <strong>{{ analysis_params.min_percent_identity }}%</strong>
+                        {% endif %}
+                        {% if analysis_params.min_percent_identity > 0 and analysis_params.min_ref_coverage > 0 %}
+                            &nbsp;|&nbsp;
+                        {% endif %}
+                        {% if analysis_params.min_ref_coverage > 0 %}
+                            Ref Coverage &ge; <strong>{{ analysis_params.min_ref_coverage }}%</strong>
+                        {% endif %}
+                    </span>
+                    {% else %}
+                    <span>
+                        <i class="text-secondary">&#10007;</i> Quality Filter: <span class="text-muted">Disabled</span>
+                    </span>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="row">
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ kpis.total_sequences }}</div>
+                    <div class="kpi-label">Total Sequences</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-success">{{ kpis.good_sequences }}</div>
+                    <div class="kpi-label">Good Sequences</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-danger">{{ kpis.rejection_rate }}</div>
+                    <div class="kpi-label">Rejection Rate</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ kpis.samples_processed }}</div>
+                    <div class="kpi-label">Samples Processed</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ kpis.otus_found }}</div>
+                    <div class="kpi-label">Unique OTUs Found</div>
+                </div></div>
+            </div>
+        </div>
+
+        {% if mapping_kpis %}
+        <h2>Section 1: Mapping QC Report</h2>
+
+        <div class="row">
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ mapping_kpis.total_reads }}</div>
+                    <div class="kpi-label">Total Input Reads</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-primary">{{ mapping_kpis.mapped_reads }}</div>
+                    <div class="kpi-label">Mapped Reads</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value {% if mapping_kpis.mapping_rate | float > 80 %}text-success{% else %}text-warning{% endif %}">{{ mapping_kpis.mapping_rate }}</div>
+                    <div class="kpi-label">Mapping Rate</div>
+                </div></div>
+            </div>
+            {% if mapping_kpis.quality_filter_active %}
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value text-success">{{ mapping_kpis.reads_after_quality_filter }}</div>
+                    <div class="kpi-label">Reads After Quality Filter</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ mapping_kpis.quality_retention }}</div>
+                    <div class="kpi-label">Quality Retention Rate</div>
+                </div></div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if mapping_kpis.quality_filter_active %}
+        <div class="alert alert-info mt-2" role="alert">
+            <strong>Alignment Quality Filters applied:</strong>
+            {% if mapping_kpis.min_percent_identity > 0 %}
+            Min Identity: <strong>{{ mapping_kpis.min_percent_identity }}%</strong>
+            {% endif %}
+            {% if mapping_kpis.min_ref_coverage > 0 %}
+            &nbsp;|&nbsp; Min Ref Coverage: <strong>{{ mapping_kpis.min_ref_coverage }}%</strong>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_mapping_div | safe }}
+            </div>
+        </div>
+
+        {% if graph_quality_div %}
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_quality_div | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+        <h3>Mapping Details per Sample</h3>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_mapping_html | safe }}
+            </div>
+        </div>
+
+        {% endif %}
+
+        <h2>Section {% if mapping_kpis %}2{% else %}1{% endif %}: Filter QC Analysis</h2>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_filter_counts_div | safe }}
+            </div>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_filter_lengths_div | safe }}
+            </div>
+        </div>
+
+        <h3>Filter Report Details</h3>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_filter_html | safe }}
+            </div>
+        </div>
+
+        <h2>Section {% if mapping_kpis %}3{% else %}2{% endif %}: Abbundaces</h2>
+
+        {% if kpis.has_otu_data %}
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <div class="row align-items-center">
+                    <div class="col-md-8">
+                        <h4 class="mb-0">Taxonomic Composition </h4>
+                    </div>
+                    <div class="col-md-4">
+                        <label for="rank-selector" class="form-label mb-0 me-2">Select Level:</label>
+                        <select id="rank-selector" class="form-select form-select-sm">
+                            <option value="Family" selected>Family</option>
+                            <option value="Genus">Genus</option>
+                            <option value="Species">Species</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="composition-graph"></div>
+            </div>
+        </div>
+
+        {% if sankey_json_data and sankey_json_data != 'null' %}
+        <div class="card shadow-sm">
+            <div class="card-header">
+                <div class="row align-items-center">
+                    <div class="col-md-4">
+                        <h4 class="mb-0">Taxonomic Lineages</h4>
+                    </div>
+                    <div class="col-md-8">
+                        <div class="d-flex flex-wrap gap-2 align-items-center" id="sankey-filters">
+                            <!-- Filter dropdowns are populated dynamically by JS -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="sankey-graph"></div>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm">
+            <div class="card-body">
+                {{ graph_otu_heatmap_div | safe }}
+            </div>
+        </div>
+
+        <h3>Full OTU Table </h3>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_otu_html | safe }}
+            </div>
+        </div>
+        {% else %}
+        <div class="alert alert-warning mt-3" role="alert">
+            <h5 class="alert-heading">No OTU data available</h5>
+            <p class="mb-0">
+                No OTU table could be generated. Possible causes:
+            </p>
+            <ul class="mb-0 mt-1">
+                {% if mapping_kpis and mapping_kpis.quality_filter_active %}
+                <li>The alignment quality filter may have removed all mapped reads.
+                    Consider lowering or disabling (set to 0) the <strong>Min Percent Identity</strong>
+                    and/or <strong>Min Reference Coverage</strong> thresholds.</li>
+                {% endif %}
+                <li>Verify that the <strong>database format</strong> selected in the GUI matches the actual
+                    database (e.g. <em>eukariome</em> vs <em>unite</em> vs <em>silva</em>). A format mismatch
+                    prevents the taxonomy join from matching any reads.</li>
+                {% if analysis_params and analysis_params.len_filter_active %}
+                <li>The length filter ({{ analysis_params.min_len }}&ndash;{{ analysis_params.max_len }} bp) may be too
+                    restrictive, leaving too few sequences for meaningful mapping.</li>
+                {% endif %}
+            </ul>
+        </div>
+        {% endif %}
+
+    </div> <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/2.0.8/js/dataTables.bootstrap5.min.js"></script>
+
+    <script>
+        // --- Inject data from Python ---
+        const allGraphData = {{ composition_json_data | safe }};
+        const sankeyData = {{ sankey_json_data | safe }};
+
+        // --- Function to draw/update the composition graph ---
+        function updateCompositionGraph(rank) {
+            if (!allGraphData) return;
+            const filteredData = allGraphData.filter(d => d.Rank === rank);
+            const groups = [...new Set(filteredData.map(d => d.Taxonomy))];
+
+            // Mean relative abundance per taxon across samples — shown next
+            // to the taxon name in the legend so readers can quickly rank
+            // taxa without having to sum stacks by eye.
+            const nSamples = new Set(filteredData.map(d => d.Sample)).size || 1;
+            const meanPct = {};
+            groups.forEach(g => {
+                const sum = filteredData
+                    .filter(d => d.Taxonomy === g)
+                    .reduce((acc, d) => acc + (d['Relative Abundance (%)'] || 0), 0);
+                meanPct[g] = sum / nSamples;
+            });
+
+            // Sort legend by mean abundance (descending) so dominant taxa
+            // appear at the top.
+            groups.sort((a, b) => meanPct[b] - meanPct[a]);
+
+            const traces = groups.map(groupName => {
+                const groupData = filteredData.filter(d => d.Taxonomy === groupName);
+                const pctLabel = meanPct[groupName].toFixed(1) + '%';
+                return {
+                    x: groupData.map(d => d.Sample),
+                    y: groupData.map(d => d['Relative Abundance (%)']),
+                    name: `${groupName} (${pctLabel})`,
+                    type: 'bar'
+                };
+            });
+
+            const layout = {
+                title: `Taxonomic Composition by ${rank}`,
+                barmode: 'stack',
+                height: 600,
+                yaxis: { title: 'Relative Abundance (%)' }
+            };
+
+            Plotly.newPlot('composition-graph', traces, layout, {responsive: true});
+        }
+
+        // ================================================================
+        // Sankey with interactive per-rank filters
+        // ================================================================
+        function initSankey() {
+            if (!sankeyData) return;
+
+            const ranks = sankeyData.ranks;           // ['Kingdom', ..., 'Species']
+            const lineages = sankeyData.lineages;     // [{Kingdom:'...', ..., count:N}, ...]
+            const rankColors = sankeyData.rankColors;
+
+            // --- Build filter dropdowns ---
+            const filtersDiv = document.getElementById('sankey-filters');
+            if (!filtersDiv) return;
+
+            // For each rank except the last (Species has no downstream),
+            // create a dropdown with unique values
+            ranks.forEach((rank, idx) => {
+                // Collect unique values for this rank (exclude Unclassified)
+                const values = [...new Set(lineages.map(l => l[rank]))]
+                    .filter(v => v && v !== 'Unclassified')
+                    .sort();
+
+                if (values.length === 0) return;
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'd-flex align-items-center';
+                wrapper.innerHTML = `
+                    <label class="form-label mb-0 me-1 text-nowrap" style="font-size:0.8rem;">${rank}:</label>
+                    <select class="form-select form-select-sm sankey-filter" data-rank="${rank}" style="min-width:120px;font-size:0.8rem;">
+                        <option value="">All</option>
+                        ${values.map(v => `<option value="${v}">${v}</option>`).join('')}
+                    </select>
+                `;
+                filtersDiv.appendChild(wrapper);
+            });
+
+            // Add cutoff percentage dropdown
+            const cutoffWrapper = document.createElement('div');
+            cutoffWrapper.className = 'd-flex align-items-center';
+            cutoffWrapper.innerHTML = `
+                <label class="form-label mb-0 me-1 text-nowrap" style="font-size:0.8rem;">Cutoff:</label>
+                <select class="form-select form-select-sm" id="sankey-cutoff" style="min-width:100px;font-size:0.8rem;">
+                    <option value="0">None</option>
+                    <option value="0.5">0.5% reads</option>
+                    <option value="1" selected>1% reads</option>
+                    <option value="3">3% reads</option>
+                    <option value="5">5% reads</option>
+                </select>
+            `;
+            filtersDiv.appendChild(cutoffWrapper);
+
+            // Add reset button
+            const resetBtn = document.createElement('button');
+            resetBtn.className = 'btn btn-outline-secondary btn-sm';
+            resetBtn.textContent = 'Reset';
+            resetBtn.style.fontSize = '0.8rem';
+            resetBtn.addEventListener('click', () => {
+                document.querySelectorAll('.sankey-filter').forEach(s => s.value = '');
+                document.getElementById('sankey-cutoff').value = '1';
+                drawSankey();
+            });
+            filtersDiv.appendChild(resetBtn);
+
+            // Attach change listeners
+            document.querySelectorAll('.sankey-filter').forEach(sel => {
+                sel.addEventListener('change', drawSankey);
+            });
+            document.getElementById('sankey-cutoff').addEventListener('change', drawSankey);
+
+            // --- Draw function ---
+            function drawSankey() {
+                // Collect active filters
+                const filters = {};
+                document.querySelectorAll('.sankey-filter').forEach(sel => {
+                    const rank = sel.dataset.rank;
+                    const val = sel.value;
+                    if (val) filters[rank] = val;
+                });
+
+                // Filter lineages
+                let filtered = lineages;
+                for (const [rank, val] of Object.entries(filters)) {
+                    filtered = filtered.filter(l => l[rank] === val);
+                }
+
+                if (filtered.length === 0) {
+                    Plotly.purge('sankey-graph');
+                    document.getElementById('sankey-graph').innerHTML =
+                        '<div class="alert alert-warning">No lineages match the selected filters.</div>';
+                    return;
+                }
+
+                // Build nodes and links from filtered lineages
+                const nodeLabels = [];
+                const nodeIndex = {};
+                const nodeRanks = [];
+
+                function getNode(label, rank) {
+                    const key = rank + '::' + label;
+                    if (!(key in nodeIndex)) {
+                        nodeIndex[key] = nodeLabels.length;
+                        nodeLabels.push(label);
+                        nodeRanks.push(rank);
+                    }
+                    return nodeIndex[key];
+                }
+
+                // Aggregate edges
+                const edgeMap = {};
+                filtered.forEach(row => {
+                    for (let i = 0; i < ranks.length - 1; i++) {
+                        const src = row[ranks[i]];
+                        const tgt = row[ranks[i + 1]];
+                        if (src === 'Unclassified' || tgt === 'Unclassified') continue;
+                        const srcIdx = getNode(src, ranks[i]);
+                        const tgtIdx = getNode(tgt, ranks[i + 1]);
+                        const eKey = srcIdx + '->' + tgtIdx;
+                        edgeMap[eKey] = (edgeMap[eKey] || 0) + row.count;
+                    }
+                });
+
+                // Apply cutoff percentage filter on edges
+                const cutoffPct = parseFloat(document.getElementById('sankey-cutoff').value) || 0;
+                const totalReads = filtered.reduce((sum, r) => sum + r.count, 0);
+                const cutoffVal = totalReads / 100 * cutoffPct;
+
+                const linkSource = [], linkTarget = [], linkValue = [];
+                for (const [eKey, val] of Object.entries(edgeMap)) {
+                    if (val < cutoffVal) continue;  // skip edges below cutoff
+                    const [s, t] = eKey.split('->').map(Number);
+                    linkSource.push(s);
+                    linkTarget.push(t);
+                    linkValue.push(val);
+                }
+
+                if (linkSource.length === 0) {
+                    Plotly.purge('sankey-graph');
+                    document.getElementById('sankey-graph').innerHTML =
+                        '<div class="alert alert-warning">No lineages above the selected cutoff threshold.</div>';
+                    return;
+                }
+
+                // Node colors
+                const nColors = nodeRanks.map(r => rankColors[r] || 'rgba(127,127,127,0.5)');
+
+                const data = [{
+                    type: 'sankey',
+                    node: {
+                        pad: 15, thickness: 20,
+                        label: nodeLabels,
+                        color: nColors,
+                        hovertemplate: '%{label}<br>Total: %{value:,}<extra></extra>'
+                    },
+                    link: {
+                        source: linkSource,
+                        target: linkTarget,
+                        value: linkValue,
+                        hovertemplate: '%{source.label} → %{target.label}<br>Reads: %{value:,}<extra></extra>'
+                    },
+                    textfont: {size: 11}
+                }];
+
+                // Build subtitle showing active filters and cutoff
+                let title = 'Taxonomic Lineages (Kingdom → Species)';
+                const filterParts = Object.entries(filters).map(([r, v]) => `${r}: ${v}`);
+                if (cutoffPct > 0) {
+                    filterParts.push(`Cutoff: ${cutoffPct}% (≥${Math.round(cutoffVal).toLocaleString()} reads)`);
+                }
+                if (filterParts.length > 0) {
+                    title += '<br><span style="font-size:12px;color:#666;">' + filterParts.join(' | ') + '</span>';
+                }
+
+                const layout = {
+                    title: { text: title },
+                    font: { size: 12 },
+                    height: 600,
+                    margin: { l: 10, r: 10, t: 60, b: 10 }
+                };
+
+                Plotly.newPlot('sankey-graph', data, layout, {responsive: true});
+            }
+
+            // Initial draw
+            drawSankey();
+        }
+
+        // --- Activators (when the page is ready) ---
+        $(document).ready(function() {
+
+            // 1. Activate the Searchable OTU Table (only if it exists)
+            if ($('#otu-table').length) {
+                $('#otu-table').DataTable({
+                    paging: true, pageLength: 10,
+                    lengthMenu: [10, 25, 50, 100],
+                    ordering: true, searching: true,
+                    language: {
+                        search: "Search table:",
+                        lengthMenu: "Show _MENU_ entries",
+                        info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                        paginate: {
+                            first: "First",
+                            last: "Last",
+                            next: "Next",
+                            previous: "Previous"
+                        }
+                    }
+                });
+            }
+
+            // 2. Activate the dropdown menu (only if composition data exists)
+            const rankSelector = document.getElementById('rank-selector');
+            if (rankSelector && allGraphData) {
+                rankSelector.addEventListener('change', (e) => {
+                    updateCompositionGraph(e.target.value);
+                });
+                // 3. Draw the initial graph (Family)
+                updateCompositionGraph('Family');
+            }
+
+            // 4. Initialize Sankey with filters
+            initSankey();
+        });
+    </script>
+
+</body>
+</html>

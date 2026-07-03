@@ -1,0 +1,71 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+dist*/
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Output directories
+mapping/
+tabeling/
+results/
+log/
+
+# Data files
+*.fasta
+*.fa
+*.fastq
+*.fq
+*.gz
+*.sam
+*.bam
+*.bai
+
+# Taxonomy maps (cached)
+*_taxonomy_map.tsv
+
+# Results
+*.xlsx
+*.csv
+*.html
+!template.html
+*.db
+
+# Temporary files
+*.tmp
+*.tmp.txt
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+LOREON.spec
+EPI2ME_issue_export/launch.json
+/EPI2ME_issue_export
+*.md
