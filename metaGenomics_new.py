@@ -99,6 +99,110 @@ def parse_arguments():
              "previous 'ref coverage' semantics were incorrect for ONT reads.",
         type=float, default=90.0, metavar="PCT"
     )
+    taxq_group = parser.add_argument_group('Taxonomic Quality / EM')
+    taxq_group.add_argument(
+        "--tax-quality", dest="tax_quality", action="store_true",
+        help="Enable taxonomic-quality metrics via a read-level BAM pass "
+             "(re-enables minimap2 secondary alignments; adds per-OTU "
+             "resolution profile + confusion network). Opt-in; inflates the "
+             "BAM ~20-30%%."
+    )
+    taxq_group.add_argument(
+        "--em", dest="em", action="store_true",
+        help="Enable fractional (EM) OTU assignment. Writes a second "
+             "OTU_Table_..._EM table alongside the primary-count table. "
+             "Implies the read-level pass (and secondary alignments)."
+    )
+    taxq_group.add_argument(
+        "--consensus-tau", dest="consensus_tau", type=float, default=0.9,
+        help="Stringency of the weighted taxonomic consensus (default 0.9; "
+             "1.0 = strict LCA)."
+    )
+    taxq_group.add_argument(
+        "--em-rank", dest="em_rank", choices=['reference', 'species', 'genus'],
+        default='reference',
+        help="Abundance unit for the EM table. Only 'reference' is implemented "
+             "(the EM's latent unit); the EM table carries full taxonomy, so "
+             "genus/species abundances are obtained by aggregating it per rank. "
+             "Passing another value is refused rather than silently ignored."
+    )
+    taxq_group.add_argument(
+        "--sec-N", dest="sec_N", type=int, default=20,
+        help="minimap2 -N (max secondary) in tax-quality mode (default 20)."
+    )
+    taxq_group.add_argument(
+        "--sec-p", dest="sec_p", type=float, default=0.8,
+        help="minimap2 -p (secondary-to-primary score ratio) in tax-quality "
+             "mode (default 0.8 = minimap2's own default). Lowering it exposes "
+             "a longer ambiguity tail but PERTURBS primary selection: measured "
+             "on a mock ITS community vs --secondary=no, -p 0.8 keeps 94.2%% of "
+             "primaries identical while -p 0.5 keeps only 86.2%%, at almost no "
+             "cost in secondaries retained (10.0 vs 19.3 per read, both with "
+             "~98%% of reads carrying at least one)."
+    )
+    taxq_group.add_argument(
+        "--em-max-iter", dest="em_max_iter", type=int, default=200,
+        help="EM maximum iterations (default 200)."
+    )
+    taxq_group.add_argument(
+        "--em-tol", dest="em_tol", type=float, default=1e-6,
+        help="EM convergence tolerance on log-likelihood delta (default 1e-6)."
+    )
+    taxq_group.add_argument(
+        "--em-prior", dest="em_prior", type=float, default=0.0,
+        help="Weak Dirichlet prior for the EM (default 0 = off; small values "
+             "stabilise rare references)."
+    )
+    taxq_group.add_argument(
+        "--score-temperature", dest="score_temperature", type=float, default=6.0,
+        help="Softmax temperature over minimap2 AS, in raw score units "
+             "(default 6.0 = one mismatch). Lower is more decisive; a "
+             "likelihood-calibrated value is nearer 2. Shared by the consensus "
+             "and the EM."
+    )
+    taxq_group.add_argument(
+        "--em-init", dest="em_init", choices=['uniform', 'primary'],
+        default='uniform',
+        help="EM initialisation (default: uniform, as kallisto/RSEM/Bracken). "
+             "'primary' warm-starts from primary counts but cannot ever assign "
+             "mass to a reference that never wins a primary alignment."
+    )
+    taxq_group.add_argument(
+        "--em-model", dest="em_model", choices=['heuristic', 'generative'],
+        default='heuristic',
+        help="Which model computes the EM/quality output. 'heuristic' (DEFAULT, "
+             "unchanged behaviour) uses softmax weights over minimap2 AS. "
+             "'generative' uses the unified probabilistic model of the formal "
+             "specification: indel-aware error model estimated from the data, "
+             "chimeras inside the likelihood, true posterior responsibilities. "
+             "Entirely opt-in — nothing changes unless you ask for it."
+    )
+    taxq_group.add_argument(
+        "--em-bootstrap", dest="em_bootstrap", type=int, default=0, metavar="B",
+        help="Generative model only: bootstrap replicates for credible intervals "
+             "on abundances and diversity (0 = off; 200-1000 recommended). "
+             "Writes <sample>.ci.tsv."
+    )
+    taxq_group.add_argument(
+        "--em-ci-alpha", dest="em_ci_alpha", type=float, default=0.05,
+        help="Generative model only: 1-alpha credible level (default 0.05 = 95%%)."
+    )
+    taxq_group.add_argument(
+        "--em-abundance", dest="em_abundance", choices=['all', 'clean'],
+        default='all',
+        help="Generative model only: 'clean' excludes chimeric contributions "
+             "from the abundance estimate."
+    )
+    taxq_group.add_argument(
+        "--em-no-estimate-error", dest="em_no_estimate_error", action="store_true",
+        help="Generative model only: keep the error model fixed instead of "
+             "estimating it from the data."
+    )
+    taxq_group.add_argument(
+        "--chimera-refined", dest="chimera_refined", action="store_true",
+        help="Enable the refined cross-taxon chimera tier (compares primary vs "
+             "supplementary taxa). Tier-1 split-rate is always computed."
+    )
     other_group = parser.add_argument_group('Other')
     other_group.add_argument(
         "--debug", help="Enable debug output.",
@@ -215,6 +319,12 @@ def main():
         else:
             print(f"[PRESET] '{options.preset}' requested but min_len/max_len "
                   f"already customised — keeping user values.")
+
+    if options.em and options.em_rank != 'reference':
+        print(f"ERROR: --em-rank '{options.em_rank}' is not implemented. The EM "
+              f"runs at the 'reference' latent unit; aggregate the EM OTU table "
+              f"per rank instead (it carries the full taxonomy).")
+        sys.exit(2)
 
     check_dependencies()
 
@@ -415,6 +525,18 @@ def main():
 
     print(f"Starting mapping with {parallel_jobs_map} parallel jobs (each with {threads_per_job_map} threads)...")
 
+    # Tax-quality / EM mode re-enables secondary alignments in the full BAM and
+    # requires the full BAM to survive tabeling for the read-level pass.
+    # --chimera-refined also needs the read-level pass (plan §3.4): previously it
+    # was accepted, echoed into mapping_stats.json as enabled, and silently did
+    # nothing while the report still drew a "0.0% chimeras" card.
+    tax_mode = options.tax_quality or options.em or options.chimera_refined
+    worker_delete_bam = options.delete_bam and not tax_mode
+    if tax_mode:
+        print(f"[TaxQuality] Read-level pass enabled "
+              f"(tax_quality={options.tax_quality}, em={options.em}, "
+              f"secondary -N {options.sec_N} -p {options.sec_p}).")
+
     map_worker_kwargs = {
         'db_path': str(db_path),
         'threads': threads_per_job_map,
@@ -424,7 +546,10 @@ def main():
         'debug': options.debug,
         'min_percent_identity': options.min_percent_identity,
         'min_ref_coverage': options.min_ref_coverage,
-        'delete_bam': options.delete_bam,
+        'delete_bam': worker_delete_bam,
+        'tax_quality_mode': tax_mode,
+        'sec_N': options.sec_N,
+        'sec_p': options.sec_p,
     }
 
     map_worker_task = partial(
@@ -456,6 +581,165 @@ def main():
         print(f"CRITICAL ERROR during mapping pool: {e}")
         sys.exit(1)
 
+    # Close Step 4 here: Step 4b is a sibling, not a child.  Opening 4b inside
+    # Step 4's window made the profiler count its time twice, so the per-step
+    # column summed past the true elapsed time.
+    if profiler:
+        success_count_p = sum(1 for r in results if r[1] == "Success")
+        profiler.end_step('Step 4: Mapping',
+                          files_to_map=len(fastq_files_to_process),
+                          success=success_count_p,
+                          failed=len(fastq_files_to_process) - success_count_p)
+
+    # =======================================================================
+    # STEP 4b: Taxonomic Quality / Chimera / EM read-level pass (opt-in)
+    # =======================================================================
+    quality_files = []
+    em_files_present = False
+    if tax_mode and mapping_stats_list:
+        if profiler:
+            profiler.start_step('Step 4b: TaxQuality/EM')
+        model_name = ('generative (unified probabilistic model)'
+                      if options.em_model == 'generative'
+                      else 'heuristic (softmax over AS)')
+        print(f"\n--- STEP 4b: Taxonomic Quality / EM (read-level pass) ---")
+        print(f"    model: {model_name}")
+        if options.em_model == 'generative' and options.em_bootstrap:
+            print(f"    bootstrap: B={options.em_bootstrap}, "
+                  f"credible level {(1-options.em_ci_alpha)*100:.0f}%")
+        try:
+            import TaxQuality
+        except ImportError as e:
+            print(f"WARNING: TaxQuality module unavailable ({e}); skipping.")
+            TaxQuality = None
+        TaxQualityModel = None
+        if options.em_model == 'generative':
+            try:
+                import TaxQualityModel
+            except ImportError as e:
+                print(f"WARNING: TaxQualityModel unavailable ({e}); "
+                      f"falling back to the heuristic model.")
+                options.em_model = 'heuristic'
+
+        if TaxQuality is not None:
+            for stats in mapping_stats_list:
+                sample = stats.get('sample')
+                if not sample:
+                    continue
+                bam_path = mapping_dir / f"{sample}_sorted_full.bam"
+                if not bam_path.exists():
+                    print(f"[TaxQuality] {sample}: full BAM missing ({bam_path.name}); skipping.")
+                    continue
+                q_out = results_dir / f"{sample}.qual.tsv" if options.tax_quality else None
+                em_out = results_dir / f"{sample}.em.tsv" if options.em else None
+                ci_out = (results_dir / f"{sample}.ci.tsv"
+                          if (options.em_model == 'generative' and options.em_bootstrap)
+                          else None)
+                try:
+                    if options.em_model == 'generative' and TaxQualityModel is not None:
+                        res = TaxQualityModel.run_sample(
+                            bam_path=bam_path,
+                            tax_map_path=str(generated_tax_map_path),
+                            db_format=options.format,
+                            flat_sh=(options.flat_sh and options.format == 'unite'),
+                            threads=threads_per_job_map,
+                            min_percent_identity=options.min_percent_identity,
+                            min_ref_coverage=options.min_ref_coverage,
+                            tau=options.consensus_tau,
+                            max_iter=options.em_max_iter,
+                            tol=options.em_tol,
+                            prior_alpha=options.em_prior,
+                            init=options.em_init,
+                            estimate_error=not options.em_no_estimate_error,
+                            bootstrap_B=options.em_bootstrap,
+                            alpha=options.em_ci_alpha,
+                            abundance=options.em_abundance,
+                            quality_out=q_out,
+                            em_out=em_out,
+                            ci_out=ci_out,
+                            debug=options.debug,
+                        )
+                    else:
+                        res = TaxQuality.run_sample(
+                            bam_path=bam_path,
+                            tax_map_path=str(generated_tax_map_path),
+                            db_format=options.format,
+                            # Flat-SH must reach the read-level pass, otherwise the
+                            # quality keys ("acc|SH") never match the OTU table
+                            # index ("SH") and every quality column joins to NaN.
+                            flat_sh=(options.flat_sh and options.format == 'unite'),
+                            threads=threads_per_job_map,
+                            # Both gates are threaded through so the EM table and
+                            # the quality columns describe the SAME read set as
+                            # the primary OTU table.
+                            min_percent_identity=options.min_percent_identity,
+                            min_ref_coverage=options.min_ref_coverage,
+                            tau=options.consensus_tau,
+                            temperature=options.score_temperature,
+                            do_quality=options.tax_quality,
+                            do_em=options.em,
+                            chimera_refined=options.chimera_refined,
+                            em_max_iter=options.em_max_iter,
+                            em_tol=options.em_tol,
+                            em_prior=options.em_prior,
+                            em_init=options.em_init,
+                            quality_out=q_out,
+                            em_out=em_out,
+                            debug=options.debug,
+                        )
+                except Exception as e:
+                    print(f"[TaxQuality] {sample}: ERROR during read-level pass: {e}")
+                    continue
+
+                # Merge the new metric blocks into this sample's stats entry
+                for key in ('taxonomic_quality', 'noise', 'em', 'model',
+                            'uncertainty', 'reads_excluded_by_quality_filter'):
+                    if key in res:
+                        stats[key] = res[key]
+                if q_out is not None and q_out.exists():
+                    quality_files.append(str(q_out))
+                if em_out is not None and em_out.exists():
+                    em_files_present = True
+                info = res.get('model') or res.get('em') or {}
+                extra = ""
+                if info:
+                    extra = f" ({info.get('iterations','?')} iters"
+                    if 'pi' in info:
+                        extra += f", pi={info['pi']:.4f}"
+                    if not info.get('converged', True):
+                        extra += ", NOT CONVERGED"
+                    extra += ")"
+                print(f"[TaxQuality] {sample}: done{extra}")
+
+        # Honour --delete-bam now that the read-level pass is finished.
+        # Deliberately OUTSIDE `if TaxQuality is not None`: when the import
+        # fails the pass is skipped, but the user still asked for the BAMs to be
+        # deleted — previously that combination deleted nothing at all.  Both
+        # the full BAM (mapping/) and the filtered BAM (tabeling/) are removed;
+        # tabeling_improved's own cleanup was disabled for this run, so leaving
+        # the filtered BAM behind leaked the larger of the two files.
+        if options.delete_bam:
+            tab_dir = output_dir / 'tabeling'
+            removed = 0
+            for stats in mapping_stats_list:
+                sample = stats.get('sample')
+                if not sample:
+                    continue
+                for p in (mapping_dir / f"{sample}_sorted_full.bam",
+                          mapping_dir / f"{sample}_sorted_full.bam.bai",
+                          tab_dir / f"{sample}_sorted_filtered.bam",
+                          tab_dir / f"{sample}_sorted_filtered.bam.bai"):
+                    if p.exists():
+                        try:
+                            p.unlink()
+                            removed += 1
+                        except Exception:
+                            pass
+            print(f"[--delete-bam] Removed {removed} intermediate BAM/index files.")
+
+        if profiler:
+            profiler.end_step('Step 4b: TaxQuality/EM')
+
     # Save mapping stats to JSON for the HTML report
     if mapping_stats_list:
         total_reads_all = sum(s.get('total_reads', 0) for s in mapping_stats_list)
@@ -480,6 +764,16 @@ def main():
             'parameters': {
                 'min_percent_identity': options.min_percent_identity,
                 'min_ref_coverage': options.min_ref_coverage,
+                'tax_quality': options.tax_quality,
+                'em': options.em,
+                'consensus_tau': options.consensus_tau,
+                'chimera_refined': options.chimera_refined,
+                'score_temperature': options.score_temperature,
+                'em_init': options.em_init,
+                'em_model': options.em_model,
+                'em_bootstrap': options.em_bootstrap,
+                'em_prior': options.em_prior,
+                'flat_sh': options.flat_sh,
             },
             'summary': {
                 'total_reads_all': total_reads_all,
@@ -497,12 +791,7 @@ def main():
         except Exception as e:
             print(f"WARNING: Could not save mapping_stats.json: {e}")
 
-    if profiler:
-        success_count_p = sum(1 for r in results if r[1] == "Success")
-        profiler.end_step('Step 4: Mapping',
-                          files_to_map=len(fastq_files_to_process),
-                          success=success_count_p,
-                          failed=len(fastq_files_to_process) - success_count_p)
+
 
     # =======================================================================
     # STEP 5: OTU Aggregation
@@ -520,9 +809,31 @@ def main():
             taxonomy_file=str(generated_tax_map_path),
             db_format=options.format,
             flat_sh=options.flat_sh,
+            quality_files=quality_files if quality_files else None,
         )
     except Exception as e:
         print(f"ERROR during final aggregation: {e}")
+
+    # Feature B: second, non-destructive OTU table with fractional EM counts.
+    if options.em and em_files_present:
+        em_output_file = output_dir / f"OTU_Table_{analysis_name}_{db_name}_EM.xlsx"
+        print(f"\n--- STEP 5b: EM OTU Table ({em_output_file.name}) ---")
+        try:
+            makeOtu_duckdb(
+                results_dir=str(results_dir),
+                output_file=str(em_output_file),
+                taxonomy_file=str(generated_tax_map_path),
+                db_format=options.format,
+                flat_sh=options.flat_sh,
+                file_suffix='.em.tsv',
+                # EM counts are genuinely fractional; rounding them to int
+                # silently destroyed read mass across a long tail of small
+                # assignments.
+                fractional_counts=True,
+            )
+            print(f"EM OTU table saved to: {em_output_file.name}")
+        except Exception as e:
+            print(f"ERROR during EM aggregation: {e}")
 
     if profiler:
         profiler.end_step('Step 5: OTU Aggregation')

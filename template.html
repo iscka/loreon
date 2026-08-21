@@ -191,6 +191,128 @@
             </div>
         </div>
 
+        {% if taxq_kpis %}
+        <h3 class="mt-4">Taxonomic Quality &amp; Noise</h3>
+        <div class="row">
+            {% if taxq_kpis.has_resolution %}
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value {% if taxq_kpis.pct_species | float > 80 %}text-success{% else %}text-warning{% endif %}">{{ taxq_kpis.pct_species }}%</div>
+                    <div class="kpi-label">Reads Resolved to Species</div>
+                </div></div>
+            </div>
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value">{{ taxq_kpis.mean_support }}</div>
+                    <div class="kpi-label">Mean Consensus Support (&tau;={{ taxq_kpis.consensus_tau }})</div>
+                </div></div>
+            </div>
+            {% endif %}
+            {% if taxq_kpis.has_split %}
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value {% if taxq_kpis.split_read_pct | float > 5 %}text-danger{% else %}text-secondary{% endif %}">{{ taxq_kpis.split_read_pct }}%</div>
+                    <div class="kpi-label">{{ taxq_kpis.split_label }}</div>
+                </div></div>
+            </div>
+            {% endif %}
+            {% if taxq_kpis.chimera_refined_active %}
+            <div class="col-md col-sm-6">
+                <div class="card kpi-card shadow-sm"><div class="card-body">
+                    <div class="kpi-value {% if taxq_kpis.chimera_rate_refined | float > 2 %}text-danger{% else %}text-secondary{% endif %}">{{ taxq_kpis.chimera_rate_refined }}%</div>
+                    <div class="kpi-label">Inter-taxon Chimera Rate</div>
+                </div></div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if taxq_kpis.has_resolution %}
+        <div class="alert alert-secondary mt-2" role="alert">
+            <small>
+            Taxonomic resolution reports the deepest rank at which each read's candidate
+            alignments agree (weighted LCA consensus, &tau;={{ taxq_kpis.consensus_tau }}).
+            Computed over {{ "{:,}".format(taxq_kpis.quality_pass_reads) }} reads &mdash; the same
+            quality-filtered read set as the OTU table
+            {%- if taxq_kpis.reads_excluded_by_quality_filter %}
+            ({{ "{:,}".format(taxq_kpis.reads_excluded_by_quality_filter) }} reads excluded by the alignment quality filter)
+            {%- endif %}.
+            {% if taxq_kpis.has_split %}
+            The split/chimera figure is a <strong>proxy for raw-read noise</strong>
+            (PCR/ligation chimeras, structural variants, tandem repeats), not a certified
+            chimera caller, and is measured over all mapped reads.
+            {% endif %}
+            </small>
+        </div>
+        {% endif %}
+
+        {% if taxq_kpis.em %}
+        <div class="alert {% if taxq_kpis.em.all_converged and taxq_kpis.em.mass_conserved %}alert-light{% else %}alert-warning{% endif %} mt-2" role="alert">
+            <small>
+            <strong>EM diagnostics:</strong>
+            {{ "{:,}".format(taxq_kpis.em.reads) }} reads &rarr;
+            {{ "{:,}".format(taxq_kpis.em.mass_assigned) }} assigned count mass
+            ({% if taxq_kpis.em.mass_conserved %}conserved{% else %}<strong>NOT conserved</strong>{% endif %});
+            max {{ taxq_kpis.em.max_iterations }} iterations;
+            {% if taxq_kpis.em.all_converged %}all samples converged{% else %}
+            <strong>did not converge:</strong> {{ taxq_kpis.em.not_converged_samples | join(', ') }}{% endif %}.
+            {% if taxq_kpis.em.reads_unassignable %}
+            <strong>{{ taxq_kpis.em.reads_unassignable }}</strong> reads had zero likelihood under the model.
+            {% endif %}
+            </small>
+        </div>
+        {% endif %}
+
+        {% if table_confusion_html %}
+        <h4 class="mt-3">Taxonomic Confusion Network (reads actually confounded)</h4>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_confusion_html | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if table_lowmapq_html %}
+        <h4 class="mt-3">Low-MAPQ dominant OTUs (possible database gap)</h4>
+        <div class="alert alert-warning" role="alert">
+            <small>These abundant OTUs have a low mean mapping quality: their reads are
+            split among several near-equivalent references &mdash; the typical signature of a
+            taxon whose correct reference is <strong>missing or under-represented in the
+            database</strong>. Consensus metrics do <strong>not</strong> flag this case
+            (reads can agree confidently on the wrong reference). Calibrated on six mock
+            communities of known composition: abundance-weighted AUROC 0.97 for mean MAPQ
+            versus 0.62&ndash;0.78 for the consensus metrics. A screening aid, not a verdict
+            &mdash; verify these assignments independently.</small>
+        </div>
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_lowmapq_html | safe }}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if em_totals %}
+        <h4 class="mt-3">Fractional (EM) Assignment vs Primary Counts</h4>
+        <div class="alert alert-secondary" role="alert">
+            <small>
+            The EM redistributes multi-mapping reads by maximum likelihood instead of
+            crediting them to whichever reference minimap2 happened to pick as primary.
+            It moved <strong>{{ em_totals.moved_pct }}%</strong> of the assigned read mass
+            ({{ "{:,.0f}".format(em_totals.moved) }} reads).
+            OTUs with non-zero abundance: {{ em_totals.n_otu_primary }} (primary)
+            &rarr; {{ em_totals.n_otu_em }} (EM).
+            Both tables are written to disk; the primary table is unchanged.
+            </small>
+        </div>
+        {% if table_em_html %}
+        <div class="card shadow-sm">
+            <div class="card-body table-wrapper">
+                {{ table_em_html | safe }}
+            </div>
+        </div>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+
         {% endif %}
 
         <h2>Section {% if mapping_kpis %}2{% else %}1{% endif %}: Filter QC Analysis</h2>
@@ -218,8 +340,8 @@
         <div class="card shadow-sm">
             <div class="card-header">
                 <div class="row align-items-center">
-                    <div class="col-md-8">
-                        <h4 class="mb-0">Taxonomic Composition </h4>
+                    <div class="col-md-4">
+                        <h4 class="mb-0">Taxonomic Composition</h4>
                     </div>
                     <div class="col-md-4">
                         <label for="rank-selector" class="form-label mb-0 me-2">Select Level:</label>
@@ -229,6 +351,16 @@
                             <option value="Species">Species</option>
                         </select>
                     </div>
+                    {% if composition_json_data_em and composition_json_data_em != 'null' %}
+                    <div class="col-md-4">
+                        <label for="source-selector" class="form-label mb-0 me-2">Abundance:</label>
+                        <select id="source-selector" class="form-select form-select-sm">
+                            <option value="primary" selected>Primary counts</option>
+                            <option value="em">Fixed (EM)</option>
+                            <option value="compare">Compare (paired)</option>
+                        </select>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
             <div class="card-body">
@@ -298,49 +430,118 @@
     <script>
         // --- Inject data from Python ---
         const allGraphData = {{ composition_json_data | safe }};
+        const allGraphDataEM = {{ composition_json_data_em | safe }};
         const sankeyData = {{ sankey_json_data | safe }};
 
-        // --- Function to draw/update the composition graph ---
-        function updateCompositionGraph(rank) {
+        // --- Composition graph: primary / EM / paired comparison ---
+
+        // Stable colour per taxon so a species keeps the same colour across
+        // ranks, across the two sources, and between the paired columns.
+        const _PALETTE = [
+            '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd','#8c564b','#e377c2',
+            '#7f7f7f','#bcbd22','#17becf','#aec7e8','#ffbb78','#98df8a','#ff9896',
+            '#c5b0d5','#c49c94','#f7b6d2','#c7c7c7','#dbdb8d','#9edae5'
+        ];
+        const _colorCache = {};
+        function colorFor(name) {
+            if (!(name in _colorCache)) {
+                const keys = Object.keys(_colorCache).length;
+                _colorCache[name] = name.startsWith('Others')
+                    ? '#b0b0b0' : _PALETTE[keys % _PALETTE.length];
+            }
+            return _colorCache[name];
+        }
+
+        function _slice(data, rank) {
+            return (data || []).filter(d => d.Rank === rank);
+        }
+
+        // mean relative abundance per taxon, used to order the legend
+        function _meanPct(rows) {
+            const nSamples = new Set(rows.map(d => d.Sample)).size || 1;
+            const m = {};
+            rows.forEach(d => {
+                m[d.Taxonomy] = (m[d.Taxonomy] || 0) + (d['Relative Abundance (%)'] || 0);
+            });
+            Object.keys(m).forEach(k => m[k] /= nSamples);
+            return m;
+        }
+
+        function _lookup(rows) {
+            const t = {};
+            rows.forEach(d => { t[d.Taxonomy + '\u0000' + d.Sample] = d['Relative Abundance (%)'] || 0; });
+            return t;
+        }
+
+        function updateCompositionGraph(rank, source) {
             if (!allGraphData) return;
-            const filteredData = allGraphData.filter(d => d.Rank === rank);
-            const groups = [...new Set(filteredData.map(d => d.Taxonomy))];
+            source = source || 'primary';
+            const primaryRows = _slice(allGraphData, rank);
+            const emRows = _slice(allGraphDataEM, rank);
 
-            // Mean relative abundance per taxon across samples — shown next
-            // to the taxon name in the legend so readers can quickly rank
-            // taxa without having to sum stacks by eye.
-            const nSamples = new Set(filteredData.map(d => d.Sample)).size || 1;
-            const meanPct = {};
-            groups.forEach(g => {
-                const sum = filteredData
-                    .filter(d => d.Taxonomy === g)
-                    .reduce((acc, d) => acc + (d['Relative Abundance (%)'] || 0), 0);
-                meanPct[g] = sum / nSamples;
+            // Single-source view: one stacked column per sample.
+            if (source !== 'compare') {
+                const rows = (source === 'em' && emRows.length) ? emRows : primaryRows;
+                const mean = _meanPct(rows);
+                const groups = [...new Set(rows.map(d => d.Taxonomy))]
+                    .sort((a, b) => mean[b] - mean[a]);
+                const traces = groups.map(g => {
+                    const gd = rows.filter(d => d.Taxonomy === g);
+                    return {
+                        x: gd.map(d => d.Sample),
+                        y: gd.map(d => d['Relative Abundance (%)']),
+                        name: `${g} (${mean[g].toFixed(1)}%)`,
+                        type: 'bar',
+                        marker: { color: colorFor(g) }
+                    };
+                });
+                const label = source === 'em' ? 'EM-corrected' : 'Primary counts';
+                Plotly.newPlot('composition-graph', traces, {
+                    title: `Taxonomic Composition by ${rank} — ${label}`,
+                    barmode: 'stack', height: 600,
+                    yaxis: { title: 'Relative Abundance (%)' }
+                }, {responsive: true});
+                return;
+            }
+
+            // Paired view: two stacked columns per sample, side by side.
+            // Same colour per taxon in both; the EM stack is hatched so the
+            // pair is readable in greyscale and by colour-blind readers.
+            const samples = [...new Set(primaryRows.map(d => d.Sample))];
+            const mean = _meanPct(primaryRows);
+            const taxa = [...new Set([
+                ...primaryRows.map(d => d.Taxonomy),
+                ...emRows.map(d => d.Taxonomy)
+            ])].sort((a, b) => (mean[b] || 0) - (mean[a] || 0));
+
+            const pLook = _lookup(primaryRows), eLook = _lookup(emRows);
+            const traces = [];
+            taxa.forEach(t => {
+                const c = colorFor(t);
+                traces.push({
+                    x: samples, y: samples.map(sm => pLook[t + '\u0000' + sm] || 0),
+                    name: t, legendgroup: t, type: 'bar',
+                    offsetgroup: 'primary', marker: { color: c },
+                    hovertemplate: '%{x}<br>' + t + ' — primary: %{y:.2f}%<extra></extra>'
+                });
+                traces.push({
+                    x: samples, y: samples.map(sm => eLook[t + '\u0000' + sm] || 0),
+                    name: t, legendgroup: t, showlegend: false, type: 'bar',
+                    offsetgroup: 'em',
+                    marker: { color: c, pattern: { shape: '/', size: 4, solidity: 0.35 } },
+                    hovertemplate: '%{x}<br>' + t + ' — EM: %{y:.2f}%<extra></extra>'
+                });
             });
 
-            // Sort legend by mean abundance (descending) so dominant taxa
-            // appear at the top.
-            groups.sort((a, b) => meanPct[b] - meanPct[a]);
-
-            const traces = groups.map(groupName => {
-                const groupData = filteredData.filter(d => d.Taxonomy === groupName);
-                const pctLabel = meanPct[groupName].toFixed(1) + '%';
-                return {
-                    x: groupData.map(d => d.Sample),
-                    y: groupData.map(d => d['Relative Abundance (%)']),
-                    name: `${groupName} (${pctLabel})`,
-                    type: 'bar'
-                };
-            });
-
-            const layout = {
-                title: `Taxonomic Composition by ${rank}`,
-                barmode: 'stack',
-                height: 600,
-                yaxis: { title: 'Relative Abundance (%)' }
-            };
-
-            Plotly.newPlot('composition-graph', traces, layout, {responsive: true});
+            Plotly.newPlot('composition-graph', traces, {
+                title: `Taxonomic Composition by ${rank} — primary (solid) vs EM (hatched)`
+                       + '<br><span style="font-size:12px;color:#666;">'
+                       + 'left column = primary counts, right column = EM-corrected; '
+                       + 'identical colour = same taxon</span>',
+                barmode: 'stack', height: 640,
+                yaxis: { title: 'Relative Abundance (%)' },
+                legend: { title: { text: 'Taxon' } }
+            }, {responsive: true});
         }
 
         // ================================================================
@@ -554,12 +755,15 @@
 
             // 2. Activate the dropdown menu (only if composition data exists)
             const rankSelector = document.getElementById('rank-selector');
+            const sourceSelector = document.getElementById('source-selector');
             if (rankSelector && allGraphData) {
-                rankSelector.addEventListener('change', (e) => {
-                    updateCompositionGraph(e.target.value);
-                });
-                // 3. Draw the initial graph (Family)
-                updateCompositionGraph('Family');
+                const redraw = () => updateCompositionGraph(
+                    rankSelector.value,
+                    sourceSelector ? sourceSelector.value : 'primary');
+                rankSelector.addEventListener('change', redraw);
+                if (sourceSelector) sourceSelector.addEventListener('change', redraw);
+                // 3. Draw the initial graph (Family, primary counts)
+                updateCompositionGraph('Family', 'primary');
             }
 
             // 4. Initialize Sankey with filters

@@ -108,6 +108,33 @@ class PipelineWorker(QObject):
             cmd.append("--delete-bam")
         if self.settings.get("flat_sh", False):
             cmd.append("--flat-sh")
+        # Taxonomic-quality / EM (opt-in; absent keys default to disabled, so
+        # existing GUI settings dicts are unaffected).
+        tax_quality = self.settings.get("tax_quality", False)
+        em = self.settings.get("em", False)
+        if tax_quality:
+            cmd.append("--tax-quality")
+        if em:
+            cmd.append("--em")
+        if self.settings.get("chimera_refined", False):
+            cmd.append("--chimera-refined")
+        # tau drives the consensus, which runs for --tax-quality OR --em.
+        # Gating it on tax_quality alone silently dropped a user-chosen value
+        # on EM-only runs.
+        if (tax_quality or em) and self.settings.get("consensus_tau") is not None:
+            cmd.extend(["--consensus-tau", str(self.settings["consensus_tau"])])
+        # Optional numeric tuning — only emitted when explicitly provided.
+        for key, flag in (("score_temperature", "--score-temperature"),
+                          ("em_prior", "--em-prior"),
+                          ("em_max_iter", "--em-max-iter"),
+                          ("em_tol", "--em-tol"),
+                          ("sec_N", "--sec-N"),
+                          ("sec_p", "--sec-p")):
+            val = self.settings.get(key)
+            if val is not None:
+                cmd.extend([flag, str(val)])
+        if self.settings.get("em_init"):
+            cmd.extend(["--em-init", str(self.settings["em_init"])])
         return cmd
 
     def _report_names(self):
@@ -123,6 +150,7 @@ class PipelineWorker(QObject):
             # OPT-7: pipeline now writes TSV; report_generator auto-detects both
             "filter_report": f"report_filtering_{min_len}_{max_len}.tsv",
             "otu_table": f"OTU_Table_{analysis_name}_{db_name}.xlsx",
+            "otu_table_em": f"OTU_Table_{analysis_name}_{db_name}_EM.xlsx",
             "html_report": f"Report_{analysis_name}_{db_name}.html",
             "mapping_stats": "mapping_stats.json",
             "project_title": f"Report: {analysis_name} (DB: {db_name})",
@@ -167,6 +195,9 @@ class PipelineWorker(QObject):
         ]
         if mapping_stats_path.exists():
             cmd.extend(["-ms", str(mapping_stats_path)])
+        em_table = output_dir / names["otu_table_em"]
+        if em_table.exists() or em_table.with_suffix('.tsv').exists():
+            cmd.extend(["-otuem", str(em_table)])
         return cmd
 
     @staticmethod
@@ -212,6 +243,9 @@ class PipelineWorker(QObject):
         ]
         if mapping_stats_path.exists():
             cmd.extend(["-ms", f"/data/output/{names['mapping_stats']}"])
+        em_table = output_dir / names["otu_table_em"]
+        if em_table.exists() or em_table.with_suffix('.tsv').exists():
+            cmd.extend(["-otuem", f"/data/output/{names['otu_table_em']}"])
         return cmd
 
     # --- Process execution ---
@@ -256,7 +290,10 @@ class PipelineWorker(QObject):
             return False
         return local_return_code == 0
 
-    # Step names updated to integer numbering
+    # Progress markers track the actual pipeline step banners.  The reformat
+    # step (old STEP 5/6) was folded into DuckDB aggregation (OPT-A1), so the
+    # markers now are: 1 Taxonomy, 2 Filter, 3 Filter Report, 4 Mapping,
+    # 4b TaxQuality/EM (opt-in), 5 OTU Aggregation, 5b EM table (opt-in).
     def update_progress_from_log(self, line):
         if "STEP 1:" in line:
             self.progress_signal.emit(5, "Step 1: Parsing Taxonomy...")
@@ -264,12 +301,14 @@ class PipelineWorker(QObject):
             self.progress_signal.emit(10, "Step 2: Filter...")
         elif "STEP 3:" in line:
             self.progress_signal.emit(40, "Step 3: Filter Report...")
+        elif "STEP 4b:" in line:
+            self.progress_signal.emit(80, "Step 4b: Taxonomic Quality / EM...")
         elif "STEP 4:" in line:
             self.progress_signal.emit(50, "Step 4: Mapping/Tabeling...")
+        elif "STEP 5b:" in line:
+            self.progress_signal.emit(92, "Step 5b: EM OTU Table...")
         elif "STEP 5:" in line:
-            self.progress_signal.emit(85, "Step 5: Reformatting...")
-        elif "STEP 6:" in line:
-            self.progress_signal.emit(90, "Step 6: OTU Aggregation...")
+            self.progress_signal.emit(88, "Step 5: OTU Aggregation...")
 
     @pyqtSlot()
     def stop(self):

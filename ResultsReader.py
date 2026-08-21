@@ -3,6 +3,7 @@ import re
 from pathlib import Path
 
 import duckdb
+import numpy as np
 import pandas as pd
 
 
@@ -34,8 +35,17 @@ def _split_taxonomy_series(taxonomy_series: pd.Series, db_format: str = 'unite')
             return [''] * 8
 
         # Replace underscores with spaces (databases like UNITE use
-        # underscores as word separators, e.g. "Tuber_melanosporum")
-        parts = [p.strip().replace('_', ' ') for p in tax_str.split(';') if p.strip()]
+        # underscores as word separators, e.g. "Tuber_melanosporum").
+        #
+        # BUGFIX: empty ranks keep their position.  Filtering them out
+        # (`if p.strip()`) left-shifted every rank below a gap, so
+        # "Fungi;Ascomycota;;;Tuberaceae;Tuber;Tuber_melanosporum" filed the
+        # family as a Class and blanked Genus/Species.  That also made this
+        # fallback disagree with the DuckDB path in _build_taxonomy_split_sql,
+        # which is positional and was already correct.
+        parts = [p.strip().replace('_', ' ') for p in tax_str.split(';')]
+        while parts and parts[-1] == '':
+            parts.pop()
 
         result = [''] * 8  # Kingdom, Phylum, Class, Order, Family, Genus, Species, Details
 
@@ -152,12 +162,133 @@ def _build_taxonomy_split_sql() -> str:
     """
 
 
+# Per-OTU taxonomic-quality columns (Feature A).  Exported so that consumers
+# — notably report_generator — can exclude them when deriving sample columns:
+# they are metadata, not abundances, and treating them as samples corrupts the
+# composition chart, the heatmap ranking and the Sankey totals.
+QUALITY_COLUMNS = ['pct_species', 'pct_genus', 'pct_above_genus', 'pct_unresolved',
+                   'resolution_rank', 'resolution_depth_mode', 'mean_support',
+                   'mean_mapq', 'top_confounder', 'confounded_reads',
+                   'qual_n_reads']
+
+# Rank order used to recompute a modal rank from aggregated percentages.
+_RANK_ORDER = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
+
+
+def _join_quality_metrics(final_df: pd.DataFrame, quality_files) -> pd.DataFrame:
+    """Aggregate per-sample <sample>.qual.tsv metrics (Feature A) across samples
+    and LEFT-JOIN them onto the OTU table by OTU_ID (the table's index).
+
+    Aggregation rules:
+      * `pct_*`, `mean_support`, `mean_mapq` are linear in reads → read-weighted
+        mean (correct pooling).
+      * `resolution_rank` is NOT averaged.  It is recomputed from the pooled
+        percentages, so it can never disagree with them (previously it was
+        copied from whichever single sample had the most reads, which could
+        report "Species" beside a pooled `pct_species` of 30%).
+      * `top_confounder` is the taxon with the most *confounded* reads summed
+        across samples; `confounded_reads` is that total.
+    OTUs without quality data get empty strings / NaN via the LEFT join.
+    """
+    frames = []
+    for qf in quality_files:
+        qf = Path(qf)
+        if not qf.exists():
+            continue
+        try:
+            df = pd.read_csv(qf, sep='\t', dtype={'otu_id': str, 'top_confounder': str})
+        except Exception:
+            continue
+        if not df.empty and 'otu_id' in df.columns:
+            frames.append(df)
+    if not frames:
+        return final_df
+
+    allq = pd.concat(frames, ignore_index=True)
+    allq['n_reads'] = pd.to_numeric(allq['n_reads'], errors='coerce').fillna(0)
+    # Missing confounder must be '' — NaN here previously survived into the
+    # delivered TSV/XLSX as the literal string "NaN".
+    if 'top_confounder' in allq.columns:
+        allq['top_confounder'] = allq['top_confounder'].fillna('').astype(str)
+    else:
+        allq['top_confounder'] = ''
+    if 'confounded_reads' not in allq.columns:
+        allq['confounded_reads'] = 0
+    allq['confounded_reads'] = pd.to_numeric(
+        allq['confounded_reads'], errors='coerce').fillna(0)
+
+    weighted_cols = [c for c in ('pct_species', 'pct_genus', 'pct_above_genus',
+                                 'pct_unresolved', 'mean_support', 'mean_mapq')
+                     if c in allq.columns]
+
+    agg_rows = {}
+    for otu, grp in allq.groupby('otu_id'):
+        w = grp['n_reads'].to_numpy(dtype=float)
+        wsum = float(w.sum())
+        row = {}
+        for col in weighted_cols:
+            vals = pd.to_numeric(grp[col], errors='coerce').fillna(0).to_numpy(dtype=float)
+            row[col] = round(float(np.average(vals, weights=w)), 3) if wsum > 0 else 0.0
+
+        # Modal rank recomputed from the pooled distribution.
+        buckets = {
+            'Species': row.get('pct_species', 0.0),
+            'Genus': row.get('pct_genus', 0.0),
+            'AboveGenus': row.get('pct_above_genus', 0.0),
+            'Unresolved': row.get('pct_unresolved', 0.0),
+        }
+        best = max(buckets.items(), key=lambda kv: kv[1])[0]
+        row['resolution_rank'] = best
+        row['resolution_depth_mode'] = {
+            'Species': 7, 'Genus': 6, 'AboveGenus': 5, 'Unresolved': 0}[best]
+
+        conf = grp[grp['top_confounder'] != '']
+        if not conf.empty:
+            tot = conf.groupby('top_confounder')['confounded_reads'].sum()
+            if tot.max() > 0:
+                row['top_confounder'] = str(tot.idxmax())
+                row['confounded_reads'] = int(tot.max())
+            else:
+                row['top_confounder'] = ''
+                row['confounded_reads'] = 0
+        else:
+            row['top_confounder'] = ''
+            row['confounded_reads'] = 0
+
+        row['qual_n_reads'] = int(wsum)
+        agg_rows[otu] = row
+
+    qdf = pd.DataFrame.from_dict(agg_rows, orient='index')
+    qdf.index.name = final_df.index.name  # OTU_ID
+    joined = final_df.join(qdf, how='left')
+    for c in ('top_confounder', 'resolution_rank'):
+        if c in joined.columns:
+            joined[c] = joined[c].fillna('')
+    return joined
+
+
 def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
-                   db_format: str = 'unite', flat_sh: bool = False):
+                   db_format: str = 'unite', flat_sh: bool = False,
+                   file_suffix: str = '.tmp.txt', quality_files=None,
+                   fractional_counts: bool = False):
+    """Aggregate per-sample count files into a wide OTU table.
+
+    file_suffix: input filename suffix to glob and strip for the sample name.
+        Defaults to '.tmp.txt' (primary counts).  The EM table reuses this
+        function with file_suffix='.em.tsv' — same schema, so no other change.
+    fractional_counts: read the count column as DOUBLE and keep fractional
+        values in the output.  Required for the EM table, whose expected counts
+        are genuinely fractional; rounding them to int silently destroyed read
+        mass across a long tail of small assignments.
+    quality_files: optional list of per-sample '<sample>.qual.tsv' paths
+        (Feature A).  When given, the per-OTU taxonomic-resolution metrics are
+        aggregated (count-weighted across samples) and LEFT-JOINed onto the
+        table by OTU_ID.
+    """
     results_path = Path(results_dir)
     output_path = Path(output_file)
 
-    input_glob_pattern = str(results_path / '*.tmp.txt')
+    input_glob_pattern = str(results_path / f'*{file_suffix}')
     all_files_raw = glob.glob(input_glob_pattern)
     # OPT-B4: normalise backslashes to forward slashes so that the
     # DuckDB `split_part(filename, '/', -1)` expression below extracts the
@@ -169,20 +300,22 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
     ]
 
     if not clean_files:
-        print(f"No valid .tmp.txt files found in {results_dir}")
+        print(f"No valid {file_suffix} files found in {results_dir}")
         return
 
     print(f"Starting count aggregation with DuckDB ({len(clean_files)} valid files)...")
 
+    count_sql_type = 'DOUBLE' if fractional_counts else 'BIGINT'
     col_types = {
         'otu_id': 'VARCHAR', 'length': 'BIGINT',
-        'mapped_count': 'BIGINT', 'unmapped_count': 'BIGINT'
+        'mapped_count': count_sql_type, 'unmapped_count': 'BIGINT'
     }
 
     col_types_sql = "{" + ", ".join(f"'{k}': '{v}'" for k, v in col_types.items()) + "}"
     clean_files_sql = "[" + ", ".join(
         "'" + f.replace("'", "''") + "'" for f in clean_files
     ) + "]"
+    suffix_sql = file_suffix.replace("'", "''")
 
     # --- OPT-A: OTU ID reformatting inside DuckDB ---
     # Replaces Step 5 (reformat_tmp_indices) entirely
@@ -230,7 +363,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
             SELECT * FROM (
                 PIVOT (
                     SELECT
-                        replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
+                        replace(split_part(filename, '/', -1), '{suffix_sql}', '') AS sample_name,
                         {reformat_expr} AS otu_id,
                         mapped_count
                     FROM read_csv(
@@ -259,7 +392,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
         sql_query = f"""
         PIVOT (
             SELECT
-                replace(split_part(filename, '/', -1), '.tmp.txt', '') AS sample_name,
+                replace(split_part(filename, '/', -1), '{suffix_sql}', '') AS sample_name,
                 {reformat_expr} AS otu_id,
                 mapped_count
             FROM read_csv(
@@ -302,10 +435,15 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
             final_df = final_df.set_index('otu_id')
             final_df.index.name = 'OTU_ID'
 
-        # fillna + astype in-place where possible
+        # fillna + astype in-place where possible.  Fractional (EM) tables keep
+        # their decimals; only integer count tables are cast.
         final_df = final_df.fillna(0)
-        num_cols = final_df.select_dtypes(include='number').columns
-        final_df[num_cols] = final_df[num_cols].astype(int)
+        if not fractional_counts:
+            num_cols = final_df.select_dtypes(include='number').columns
+            final_df[num_cols] = final_df[num_cols].astype(int)
+        else:
+            num_cols = final_df.select_dtypes(include='number').columns
+            final_df[num_cols] = final_df[num_cols].round(4)
 
         # Strip whitespace from taxonomy string columns
         str_cols = final_df.select_dtypes(include='object').columns
@@ -335,6 +473,13 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
         import traceback
         traceback.print_exc()
         return
+
+    # --- Feature A: LEFT-JOIN per-OTU taxonomic-quality metrics ---
+    if quality_files:
+        try:
+            final_df = _join_quality_metrics(final_df, quality_files)
+        except Exception as e:
+            print(f"WARNING: could not join taxonomic-quality metrics: {e}")
 
     # --- OPT-A5: Save TSV first (instant), then XLSX for user convenience ---
     tsv_output = output_path.with_suffix('.tsv')

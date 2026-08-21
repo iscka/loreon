@@ -273,6 +273,61 @@ class MainWindow(QMainWindow):
             "Ignored for other database formats."
         )
         options_left_layout.addWidget(self.flat_sh_check)
+
+        # --- Taxonomic Quality / EM (opt-in; costs a read-level BAM pass) ---
+        self.tax_quality_check = QCheckBox("Taxonomic quality metrics")
+        self.tax_quality_check.setToolTip(
+            "Read-level BAM pass that reports, per OTU, how deep the taxonomy\n"
+            "is actually credible (weighted LCA consensus) and which taxa it is\n"
+            "confused with.\n"
+            "Re-enables minimap2 secondary alignments: the BAM grows ~20-30%."
+        )
+        options_left_layout.addWidget(self.tax_quality_check)
+
+        self.em_check = QCheckBox("Fractional abundance (EM)")
+        self.em_check.setToolTip(
+            "Redistribute multi-mapping reads by maximum likelihood\n"
+            "(kallisto / RSEM / Bracken style) and write a second\n"
+            "OTU_Table_..._EM table alongside the primary-count table.\n"
+            "The original table is left unchanged."
+        )
+        options_left_layout.addWidget(self.em_check)
+
+        self.chimera_refined_check = QCheckBox("Refined chimera rate")
+        self.chimera_refined_check.setToolTip(
+            "Compare the taxon of each read's primary alignment with its\n"
+            "supplementary (split) segments to flag cross-taxon chimeras.\n"
+            "Requires the read-level pass."
+        )
+        options_left_layout.addWidget(self.chimera_refined_check)
+
+        tau_row = QHBoxLayout()
+        tau_row.addWidget(QLabel("Consensus τ:"))
+        self.consensus_tau_input = QDoubleSpinBox()
+        self.consensus_tau_input.setRange(0.5, 1.0)
+        self.consensus_tau_input.setSingleStep(0.05)
+        self.consensus_tau_input.setValue(0.9)
+        self.consensus_tau_input.setToolTip(
+            "Stringency of the taxonomic consensus.\n"
+            "1.0 = strict LCA (fragile: one spurious hit drags the call up a rank).\n"
+            "0.9 = weighted majority, robust to noise."
+        )
+        tau_row.addWidget(self.consensus_tau_input)
+        tau_row.addStretch()
+        options_left_layout.addLayout(tau_row)
+
+        # τ only applies when the consensus is computed at all
+        def _sync_taxq_enabled():
+            on = self.tax_quality_check.isChecked() or self.em_check.isChecked() \
+                 or self.chimera_refined_check.isChecked()
+            self.consensus_tau_input.setEnabled(
+                self.tax_quality_check.isChecked() or self.em_check.isChecked())
+            return on
+
+        for _cb in (self.tax_quality_check, self.em_check, self.chimera_refined_check):
+            _cb.toggled.connect(lambda _checked: _sync_taxq_enabled())
+        _sync_taxq_enabled()
+
         options_layout.addLayout(options_left_layout)
 
         filter_box = QGroupBox("Read & Alignment Filter")
@@ -594,6 +649,11 @@ class MainWindow(QMainWindow):
             "profile": self.profile_check.isChecked(),
             "delete_bam": self.delete_bam_check.isChecked(),
             "flat_sh": self.flat_sh_check.isChecked(),
+            # Taxonomic Quality / EM (opt-in)
+            "tax_quality": self.tax_quality_check.isChecked(),
+            "em": self.em_check.isChecked(),
+            "chimera_refined": self.chimera_refined_check.isChecked(),
+            "consensus_tau": self.consensus_tau_input.value(),
             "use_docker": use_docker,
         }
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
@@ -659,7 +719,10 @@ class MainWindow(QMainWindow):
                        self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
                        self.force_tax_map_check, self.profile_check,
-                       self.delete_bam_check, self.flat_sh_check, self.docker_check,
+                       self.delete_bam_check, self.flat_sh_check,
+                       self.tax_quality_check, self.em_check,
+                       self.chimera_refined_check, self.consensus_tau_input,
+                       self.docker_check,
                        self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
 

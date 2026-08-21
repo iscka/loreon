@@ -1,0 +1,49 @@
+{
+  "run_date": "2026-07-25 17:58:33",
+  "steps": {
+    "Step 1: Taxonomy": {
+      "wall_time_s": 0.018,
+      "cpu_time_s": 0.014,
+      "mem_mb": 121.8,
+      "taxonomy_entries": 168030
+    },
+    "Step 2: Filter": {
+      "wall_time_s": 1.18,
+      "cpu_time_s": 0.045,
+      "mem_mb": 122.5,
+      "directories": 18,
+      "sequences_total": 252921,
+      "sequences_good": 252921,
+      "sequences_bad": 0,
+      "throughput_seq_s": 214407
+    },
+    "Step 3: Filter Report": {
+      "wall_time_s": 0.013,
+      "cpu_time_s": 0.008,
+      "mem_mb": 122.5
+    },
+    "Step 4: Mapping": {
+      "wall_time_s": 113.965,
+      "cpu_time_s": 0.01,
+      "mem_mb": 122.5,
+      "files_to_map": 18,
+      "success": 18,
+      "failed": 0
+    },
+    "Step 4b: TaxQuality/EM": {
+      "wall_time_s": 132.629,
+      "cpu_time_s": 56.682,
+      "mem_mb": 210.2
+    },
+    "Step 5: OTU Aggregation": {
+      "wall_time_s": 0.468,
+      "cpu_time_s": 0.619,
+      "mem_mb": 475.5
+    }
+  },
+  "total_wall_time_s": 248.273,
+  "peak_memory_mb": 475.5,
+  "total_threads": 14,
+  "threads_per_job": 7,
+  "parallel_jobs": 2
+}

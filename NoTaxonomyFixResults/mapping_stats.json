@@ -1,0 +1,1121 @@
+{
+  "samples": [
+    {
+      "sample": "MockB_2_T1",
+      "total_reads": 21852,
+      "mapped_unfiltered": 21633,
+      "mapped_filtered": 21633,
+      "mapping_rate_pct": 99.0,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 14196,
+      "chimera_rate_raw_pct": 65.62,
+      "references_detected": 62,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 9478
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 8120
+          },
+          {
+            "ref": "Geotrichum_ghanense|NR_155145|SH1263720.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Geotrichum;s__Geotrichum_ghanense",
+            "count": 838
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 666
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 555
+          },
+          {
+            "ref": "Dipodascus_sp|MH153552|SH1354973.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 404
+          },
+          {
+            "ref": "Dipodascus_sp|UDB05237940|SH1354967.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 357
+          },
+          {
+            "ref": "Lipomyces_kononenkoae|AB747653|SH1326507.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Lipomycetaceae;g__Lipomyces;s__Lipomyces_kononenkoae",
+            "count": 250
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 250
+          },
+          {
+            "ref": "Lipomyces_spencermartinsiae|AB747658|SH1326511.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Lipomycetaceae;g__Lipomyces;s__Lipomyces_spencermartinsiae",
+            "count": 114
+          }
+        ],
+        "top_ref_share_pct": 43.81,
+        "median_count_per_ref": 4,
+        "p95_count_per_ref": 666,
+        "singleton_refs": 17
+      }
+    },
+    {
+      "sample": "MockF_2_T3",
+      "total_reads": 15792,
+      "mapped_unfiltered": 15674,
+      "mapped_filtered": 15674,
+      "mapping_rate_pct": 99.25,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 16172,
+      "chimera_rate_raw_pct": 103.18,
+      "references_detected": 52,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 7751
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 6735
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 796
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 88
+          },
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 82
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 62
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 28
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 14
+          },
+          {
+            "ref": "Saccharomyces_cerevisiae|MN796509|SH1085887.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 10
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 10
+          }
+        ],
+        "top_ref_share_pct": 49.45,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 88,
+        "singleton_refs": 20
+      }
+    },
+    {
+      "sample": "MockF_2_T2",
+      "total_reads": 10395,
+      "mapped_unfiltered": 10247,
+      "mapped_filtered": 10247,
+      "mapping_rate_pct": 98.58,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 10726,
+      "chimera_rate_raw_pct": 104.67,
+      "references_detected": 49,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 5060
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 4552
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 363
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 47
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 34
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 30
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 19
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 19
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 14
+          },
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 14
+          }
+        ],
+        "top_ref_share_pct": 49.38,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 363,
+        "singleton_refs": 21
+      }
+    },
+    {
+      "sample": "MockC_2_T1",
+      "total_reads": 14506,
+      "mapped_unfiltered": 14383,
+      "mapped_filtered": 14383,
+      "mapping_rate_pct": 99.15,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 13412,
+      "chimera_rate_raw_pct": 93.25,
+      "references_detected": 89,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 6309
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 2035
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 1688
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 1157
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 782
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 754
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 438
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 415
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 277
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 134
+          }
+        ],
+        "top_ref_share_pct": 43.86,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 782,
+        "singleton_refs": 42
+      }
+    },
+    {
+      "sample": "MockD_2_T1",
+      "total_reads": 12399,
+      "mapped_unfiltered": 12337,
+      "mapped_filtered": 12337,
+      "mapping_rate_pct": 99.5,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 4996,
+      "chimera_rate_raw_pct": 40.5,
+      "references_detected": 49,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 6315
+          },
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 2735
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 1073
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 511
+          },
+          {
+            "ref": "Rhodotorula_mucilaginosa|AF444541|SH1231669.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_mucilaginosa",
+            "count": 496
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 463
+          },
+          {
+            "ref": "Rhodotorula_diobovata|AF444502|SH1231814.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_diobovata",
+            "count": 457
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 139
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 43
+          },
+          {
+            "ref": "Rhodotorula_diobovata|OM181942|SH1231785.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_diobovata",
+            "count": 15
+          }
+        ],
+        "top_ref_share_pct": 51.19,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 1073,
+        "singleton_refs": 22
+      }
+    },
+    {
+      "sample": "MockE_2_T1",
+      "total_reads": 23252,
+      "mapped_unfiltered": 23004,
+      "mapped_filtered": 23004,
+      "mapping_rate_pct": 98.93,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 20228,
+      "chimera_rate_raw_pct": 87.93,
+      "references_detected": 94,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 4947
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 3717
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 3631
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 2839
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 2440
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 2000
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 1701
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 565
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 526
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 154
+          }
+        ],
+        "top_ref_share_pct": 21.5,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 2000,
+        "singleton_refs": 33
+      }
+    },
+    {
+      "sample": "MockA_2_T3",
+      "total_reads": 24246,
+      "mapped_unfiltered": 23859,
+      "mapped_filtered": 23859,
+      "mapping_rate_pct": 98.4,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 17084,
+      "chimera_rate_raw_pct": 71.6,
+      "references_detected": 138,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 6494
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 4322
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 3111
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 2549
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 2123
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 1417
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 1266
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 713
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 342
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 267
+          }
+        ],
+        "top_ref_share_pct": 27.22,
+        "median_count_per_ref": 3,
+        "p95_count_per_ref": 713,
+        "singleton_refs": 45
+      }
+    },
+    {
+      "sample": "MockA_2_T2",
+      "total_reads": 11535,
+      "mapped_unfiltered": 11341,
+      "mapped_filtered": 11341,
+      "mapping_rate_pct": 98.32,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 7958,
+      "chimera_rate_raw_pct": 70.17,
+      "references_detected": 97,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 2961
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 2161
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 1457
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 1203
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 1081
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 641
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 550
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 358
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 175
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 142
+          }
+        ],
+        "top_ref_share_pct": 26.11,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 641,
+        "singleton_refs": 41
+      }
+    },
+    {
+      "sample": "MockB_2_T2",
+      "total_reads": 9099,
+      "mapped_unfiltered": 9002,
+      "mapped_filtered": 9002,
+      "mapping_rate_pct": 98.93,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 5178,
+      "chimera_rate_raw_pct": 57.52,
+      "references_detected": 60,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 3944
+          },
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 3524
+          },
+          {
+            "ref": "Geotrichum_ghanense|NR_155145|SH1263720.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Geotrichum;s__Geotrichum_ghanense",
+            "count": 342
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 246
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 233
+          },
+          {
+            "ref": "Dipodascus_sp|UDB05237940|SH1354967.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 134
+          },
+          {
+            "ref": "Dipodascus_sp|MH153552|SH1354973.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 124
+          },
+          {
+            "ref": "Lipomyces_kononenkoae|AB747653|SH1326507.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Lipomycetaceae;g__Lipomyces;s__Lipomyces_kononenkoae",
+            "count": 77
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 58
+          },
+          {
+            "ref": "Debaryomyces_robertsiae|AB054019|SH1242698.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_robertsiae",
+            "count": 49
+          }
+        ],
+        "top_ref_share_pct": 43.81,
+        "median_count_per_ref": 3,
+        "p95_count_per_ref": 246,
+        "singleton_refs": 23
+      }
+    },
+    {
+      "sample": "MockB_2_T3",
+      "total_reads": 10095,
+      "mapped_unfiltered": 9999,
+      "mapped_filtered": 9999,
+      "mapping_rate_pct": 99.05,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 5342,
+      "chimera_rate_raw_pct": 53.43,
+      "references_detected": 51,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 4857
+          },
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 3534
+          },
+          {
+            "ref": "Geotrichum_ghanense|NR_155145|SH1263720.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Geotrichum;s__Geotrichum_ghanense",
+            "count": 329
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 302
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 284
+          },
+          {
+            "ref": "Dipodascus_sp|MH153552|SH1354973.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 139
+          },
+          {
+            "ref": "Dipodascus_sp|UDB05237940|SH1354967.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 129
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 81
+          },
+          {
+            "ref": "Lipomyces_kononenkoae|AB747653|SH1326507.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Lipomycetaceae;g__Lipomyces;s__Lipomyces_kononenkoae",
+            "count": 69
+          },
+          {
+            "ref": "Debaryomyces_robertsiae|AB054019|SH1242698.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_robertsiae",
+            "count": 48
+          }
+        ],
+        "top_ref_share_pct": 48.57,
+        "median_count_per_ref": 3,
+        "p95_count_per_ref": 302,
+        "singleton_refs": 17
+      }
+    },
+    {
+      "sample": "MockF_2_T1",
+      "total_reads": 20281,
+      "mapped_unfiltered": 20173,
+      "mapped_filtered": 20173,
+      "mapping_rate_pct": 99.47,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 20915,
+      "chimera_rate_raw_pct": 103.68,
+      "references_detected": 53,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 10118
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 8552
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 1065
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 123
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 106
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 37
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 19
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 15
+          },
+          {
+            "ref": "Saccharomyces_cerevisiae|MN796509|SH1085887.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 13
+          },
+          {
+            "ref": "Dipodascus_sp|MH153596|SH1354959.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Dipodascaceae;g__Dipodascus;s__Dipodascus_sp",
+            "count": 13
+          }
+        ],
+        "top_ref_share_pct": 50.16,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 123,
+        "singleton_refs": 25
+      }
+    },
+    {
+      "sample": "MockC_2_T3",
+      "total_reads": 7633,
+      "mapped_unfiltered": 7550,
+      "mapped_filtered": 7550,
+      "mapping_rate_pct": 98.91,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 7014,
+      "chimera_rate_raw_pct": 92.9,
+      "references_detected": 65,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 3410
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 920
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 865
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 590
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 389
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 365
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 246
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 238
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 225
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 85
+          }
+        ],
+        "top_ref_share_pct": 45.17,
+        "median_count_per_ref": 1,
+        "p95_count_per_ref": 590,
+        "singleton_refs": 36
+      }
+    },
+    {
+      "sample": "MockC_2_T2",
+      "total_reads": 10059,
+      "mapped_unfiltered": 9950,
+      "mapped_filtered": 9950,
+      "mapping_rate_pct": 98.92,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 9558,
+      "chimera_rate_raw_pct": 96.06,
+      "references_detected": 80,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 4671
+          },
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 1406
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 823
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 721
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 555
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 460
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 383
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 294
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 276
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 90
+          }
+        ],
+        "top_ref_share_pct": 46.94,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 555,
+        "singleton_refs": 36
+      }
+    },
+    {
+      "sample": "MockD_2_T3",
+      "total_reads": 11324,
+      "mapped_unfiltered": 11258,
+      "mapped_filtered": 11258,
+      "mapping_rate_pct": 99.42,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 6300,
+      "chimera_rate_raw_pct": 55.96,
+      "references_detected": 53,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 4584
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 4415
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 659
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 484
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 323
+          },
+          {
+            "ref": "Rhodotorula_mucilaginosa|AF444541|SH1231669.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_mucilaginosa",
+            "count": 316
+          },
+          {
+            "ref": "Rhodotorula_diobovata|AF444502|SH1231814.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_diobovata",
+            "count": 239
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 70
+          },
+          {
+            "ref": "Nakaseomyces_glabratus|MF767833|SH1215214.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Nakaseomyces;s__Nakaseomyces_glabratus",
+            "count": 48
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 14
+          }
+        ],
+        "top_ref_share_pct": 40.72,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 484,
+        "singleton_refs": 24
+      }
+    },
+    {
+      "sample": "MockD_2_T2",
+      "total_reads": 8400,
+      "mapped_unfiltered": 8353,
+      "mapped_filtered": 8353,
+      "mapping_rate_pct": 99.44,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 4393,
+      "chimera_rate_raw_pct": 52.59,
+      "references_detected": 45,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 3621
+          },
+          {
+            "ref": "Saccharomyces_cerevisiae|AB018043|SH1085902.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_cerevisiae",
+            "count": 3190
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 438
+          },
+          {
+            "ref": "Rhodotorula_mucilaginosa|AF444541|SH1231669.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_mucilaginosa",
+            "count": 299
+          },
+          {
+            "ref": "Rhodotorula_diobovata|AF444502|SH1231814.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_diobovata",
+            "count": 248
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 203
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 198
+          },
+          {
+            "ref": "Debaryomyces_prosopidis|JN942657|SH1242810.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Debaryomyces;s__Debaryomyces_prosopidis",
+            "count": 62
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 10
+          },
+          {
+            "ref": "Rhodotorula_diobovata|OM181942|SH1231785.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Sporidiobolales;f__Sporidiobolaceae;g__Rhodotorula;s__Rhodotorula_diobovata",
+            "count": 9
+          }
+        ],
+        "top_ref_share_pct": 43.35,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 438,
+        "singleton_refs": 19
+      }
+    },
+    {
+      "sample": "MockE_2_T3",
+      "total_reads": 8709,
+      "mapped_unfiltered": 8605,
+      "mapped_filtered": 8605,
+      "mapping_rate_pct": 98.81,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 7702,
+      "chimera_rate_raw_pct": 89.51,
+      "references_detected": 67,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 1931
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 1494
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 1315
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 1000
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 904
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 681
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 586
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 231
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 205
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 55
+          }
+        ],
+        "top_ref_share_pct": 22.44,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 1000,
+        "singleton_refs": 27
+      }
+    },
+    {
+      "sample": "MockE_2_T2",
+      "total_reads": 19498,
+      "mapped_unfiltered": 19221,
+      "mapped_filtered": 19221,
+      "mapping_rate_pct": 98.58,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 16485,
+      "chimera_rate_raw_pct": 85.77,
+      "references_detected": 93,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 3924
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 3091
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 3062
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 2415
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 2108
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 2045
+          },
+          {
+            "ref": "Saccharomyces_bayanus|AY046152|SH1494803.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Saccharomyces;s__Saccharomyces_bayanus",
+            "count": 1140
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 468
+          },
+          {
+            "ref": "Hanseniaspora_uvarum|KJ507660|SH1339598.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycodaceae;g__Hanseniaspora;s__Hanseniaspora_uvarum",
+            "count": 331
+          },
+          {
+            "ref": "Candida_albicans|MF767817|SH1382628.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_albicans",
+            "count": 146
+          }
+        ],
+        "top_ref_share_pct": 20.42,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 2045,
+        "singleton_refs": 35
+      }
+    },
+    {
+      "sample": "MockA_2_T1",
+      "total_reads": 13846,
+      "mapped_unfiltered": 13693,
+      "mapped_filtered": 13693,
+      "mapping_rate_pct": 98.89,
+      "quality_retention_pct": 100.0,
+      "min_percent_identity": 0.0,
+      "min_ref_coverage": 0.0,
+      "supplementary_count": 9726,
+      "chimera_rate_raw_pct": 71.03,
+      "references_detected": 112,
+      "per_ref": {
+        "top10": [
+          {
+            "ref": "Candida_haemuloni|AY500375|SH1409562.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetales_fam_Incertae_sedis;g__Candida;s__Candida_haemuloni",
+            "count": 3694
+          },
+          {
+            "ref": "Chrysozyma_sambuci|MK050431|SH1053414.10FU|refs|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Microbotryomycetes_ord_Incertae_sedis;f__Chrysozymaceae;g__Chrysozyma;s__Chrysozyma_sambuci",
+            "count": 2538
+          },
+          {
+            "ref": "Yamadazyma_takamatsuzukensis|AB365470|SH1242804.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_takamatsuzukensis",
+            "count": 1819
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KM209325|SH1089542.10FU|reps|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 1428
+          },
+          {
+            "ref": "Metschnikowia_sp|KU240634|SH0022967.10FU|reps_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_sp",
+            "count": 1269
+          },
+          {
+            "ref": "Metschnikowia_chrysoperlae|FJ623593|SH1393972.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_chrysoperlae",
+            "count": 713
+          },
+          {
+            "ref": "Metschnikowia_pulcherrima|KY104205|SH1499663.10FU|refs_singleton|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Metschnikowiaceae;g__Metschnikowia;s__Metschnikowia_pulcherrima",
+            "count": 710
+          },
+          {
+            "ref": "Zygotorulaspora_dagestanica|MW036827|SH1417387.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Saccharomycetaceae;g__Zygotorulaspora;s__Zygotorulaspora_dagestanica",
+            "count": 419
+          },
+          {
+            "ref": "Yamadazyma_tumulicola|AB365463|SH1249867.10FU|refs|k__Fungi;p__Ascomycota;c__Saccharomycetes;o__Saccharomycetales;f__Debaryomycetaceae;g__Yamadazyma;s__Yamadazyma_tumulicola",
+            "count": 224
+          },
+          {
+            "ref": "Camptobasidiaceae_sp|MW561274|SH1410112.10FU|reps|k__Fungi;p__Basidiomycota;c__Microbotryomycetes;o__Kriegeriales;f__Camptobasidiaceae;g__Camptobasidiaceae_gen_Incertae_sedis;s__Camptobasidiaceae_sp",
+            "count": 158
+          }
+        ],
+        "top_ref_share_pct": 26.98,
+        "median_count_per_ref": 2,
+        "p95_count_per_ref": 710,
+        "singleton_refs": 52
+      }
+    }
+  ],
+  "parameters": {
+    "min_percent_identity": 0.0,
+    "min_ref_coverage": 0.0,
+    "tax_quality": false,
+    "em": false,
+    "consensus_tau": 0.9,
+    "chimera_refined": false,
+    "score_temperature": 6.0,
+    "em_init": "uniform",
+    "em_prior": 0.0,
+    "flat_sh": false
+  },
+  "summary": {
+    "total_reads_all": 252921,
+    "total_mapped_all": 250282,
+    "total_after_quality_filter": 250282,
+    "overall_mapping_rate_pct": 98.96,
+    "overall_quality_retention_pct": 100.0
+  }
+}

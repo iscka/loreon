@@ -1,0 +1,244 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[a4paper,margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor={blue!55!black},urlcolor={blue!55!black},citecolor={blue!55!black}]{hyperref}
+
+\newcommand{\Rd}{\mathbf{r}}
+\newcommand{\bt}{\boldsymbol{\theta}}
+\newcommand{\bpi}{\pi}
+\newcommand{\ee}{\mathbf{e}}
+\newcommand{\Lhood}{\mathcal{L}}
+\newcommand{\Cand}{\mathcal{C}}
+\newcommand{\Hyp}{\mathcal{H}}
+\newcommand{\Split}{\mathcal{S}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\I}{\mathbb{1}}
+\newcommand{\lin}{\mathrm{lin}}
+
+\title{\vspace{-1.2cm}\textbf{LOREON --- Specifica formale del modello generativo unificato\\ per la quantificazione di comunità da amplicon long-read}\\[4pt]
+\large Modello, algoritmo EM, modello d'errore indel-aware e protocollo di benchmark}
+\author{Documento tecnico di design --- progetto LOREON / TaxQuality}
+\date{\today}
+
+\begin{document}
+\maketitle
+\vspace{-0.6cm}
+
+\begin{abstract}
+\noindent Questa specifica formalizza il modulo TaxQuality come un \emph{unico} modello generativo probabilistico dei dati di sequenziamento long-read (Oxford Nanopore) per marcatori metabarcoding (ITS, 16S, LSU, SSU). Da una sola verosimiglianza derivano, in modo coerente: (i)~l'abbondanza delle unit\`a tassonomiche, (ii)~la risoluzione tassonomica per-lettura e per-OTU, (iii)~il tasso di chimere/rumore, e (iv)~---~elemento distintivo~---~l'incertezza \emph{calibrata} su abbondanze e diversit\`a. Il modello incorpora un modello d'errore \emph{indel-aware} (l'errore ONT \`e dominato da inserzioni/delezioni) e una componente di mistura per le letture chimeriche. L'inferenza \`e per massima verosimiglianza tramite Expectation--Maximization (EM), di cui si fornisce la derivazione completa. Ci si posiziona rispetto al prior art pi\`u vicino (Emu, \emph{Nature Methods} 2022, EM per abbondanza 16S long-read): il contributo \`e il trattamento \emph{congiunto} di errore indel-aware, chimere e risoluzione, con quantificazione dell'incertezza calibrata e validazione cross-marcatore. Chiude un protocollo di benchmark dettagliato.
+\end{abstract}
+
+\section{Introduzione e relazione con lo stato dell'arte}
+La quantificazione da amplicon long-read soffre di tre problemi che oggi si affrontano con euristiche separate: l'\emph{ambiguit\`a di mappaggio} (letture che corrispondono a pi\`u riferimenti quasi identici, es.\ le \emph{Species Hypothesis} di UNITE), il \emph{rumore/chimere} (letture spezzate da artefatti di PCR o giunzioni), e l'\emph{errore di sequenziamento} ONT (elevato e indel-dominante). La ridistribuzione delle letture multi-mapping per massima verosimiglianza tramite EM \`e consolidata nella quantificazione RNA-seq (RSEM~\cite{rsem}, kallisto~\cite{kallisto}, Salmon~\cite{salmon}) e in metagenomica (Bracken~\cite{bracken}); \textbf{Emu}~\cite{emu} la porta agli amplicon 16S full-length ONT con un EM su un profilo d'errore.
+
+Rispetto a Emu, che stima le sole abbondanze (16S, stime puntuali), questa specifica: (a)~usa un modello d'errore \emph{indel-aware} esplicito; (b)~integra una \emph{componente chimera} nella stessa verosimiglianza; (c)~restituisce la \emph{risoluzione tassonomica} come probabilit\`a posteriore; (d)~fornisce \emph{intervalli di credibilit\`a calibrati} su abbondanze e indici di diversit\`a; (e)~\`e \emph{multi-marcatore} (incluso l'ITS, dove l'over-split delle SH \`e critico~\cite{koljalg,schoch}). Il modello d'errore condizionato all'allineamento segue la logica dei pair-HMM~\cite{durbin}; l'EM \`e quello classico~\cite{dempster}.
+
+\section{Notazione e dati osservati}
+Consideriamo un campione con letture $r=1,\dots,N$. minimap2~\cite{minimap2} (con allineamenti secondari attivi, \texttt{-N}/\texttt{-p}, e supplementari) fornisce per ogni lettura un insieme di allineamenti candidati verso i riferimenti $j$ di un database (es.\ UNITE); sia $\Cand_r\subseteq\{1,\dots,J\}$ l'insieme dei riferimenti candidati per la lettura $r$ (primario $+$ secondari che superano un filtro minimo di qualit\`a). Dall'allineamento $r\!\to\!j$ (CIGAR $+$ tag \texttt{NM}/\texttt{cs}) estraiamo le statistiche sufficienti:
+\[
+n^{rj}_{M}\ (\text{match}),\quad n^{rj}_{S}\ (\text{sostituzioni}),\quad n^{rj}_{I}\ (\text{inserzioni}),\quad n^{rj}_{D}\ (\text{delezioni}),
+\]
+con lunghezza allineata (numero di colonne) $N^{rj}=n^{rj}_M+n^{rj}_S+n^{rj}_I+n^{rj}_D$ e distanza di edit $\texttt{NM}=n^{rj}_S+n^{rj}_I+n^{rj}_D$. Se la lettura presenta un allineamento \emph{supplementare} (split), sia $\Split_r$ l'insieme delle coppie $(a,b)$ di riferimenti che spiegano i due segmenti disgiunti (dal tag \texttt{SA}); per ciascun segmento disponiamo delle stesse statistiche sufficienti. La Tabella~\ref{tab:not} riassume i simboli.
+
+\begin{table}[h]\centering\small
+\begin{tabular}{@{}ll@{}}
+\toprule
+Simbolo & Significato\\
+\midrule
+$\bt=(\theta_1,\dots,\theta_J)$ & abbondanze relative dei riferimenti, $\sum_j\theta_j=1$\\
+$\ee=(e_M,e_S,e_I,e_D)$ & parametri del modello d'errore (categorica su operazioni), $\sum_O e_O=1$\\
+$\bpi$ & probabilit\`a a priori che una lettura \emph{con split} sia chimerica\\
+$z_r$ & stato latente della lettura $r$ (sorgente singola, o coppia chimerica)\\
+$L(r\mid j)$ & verosimiglianza dell'allineamento di $r$ al riferimento $j$\\
+$\gamma_{rj},\ \rho_r$ & responsabilit\`a posteriori (sorgente $j$ / chimera)\\
+$\lin(j)$ & lineage tassonomico del riferimento $j$\\
+\bottomrule
+\end{tabular}
+\caption{Notazione principale.}\label{tab:not}
+\end{table}
+
+\section{Modello generativo}
+Ogni lettura \`e generata da uno stato latente $z_r$. Sia $\I^{\mathrm{sp}}_r=1$ se la lettura presenta un allineamento supplementare (split), altrimenti $0$. La storia generativa \`e:
+\begin{enumerate}[nosep,leftmargin=1.4em]
+\item \textbf{Chimera?} $c_r\sim\text{Bernoulli}(\bpi\,\I^{\mathrm{sp}}_r)$. Una lettura senza split non pu\`o essere chimerica ($c_r=0$).
+\item \textbf{Se $c_r=0$:} si estrae una sorgente $z_r=j$ da una categorica $\propto\theta_j$ ristretta a $\Cand_r$; la lettura \`e una copia rumorosa del riferimento $j$ sotto il modello d'errore $\ee$, che induce l'allineamento osservato con verosimiglianza $L(r\mid j)$.
+\item \textbf{Se $c_r=1$:} si estraggono due sorgenti $(a,b)$ con probabilit\`a $\propto\theta_a\theta_b$ ristretta a $\Split_r$; i due segmenti sono copie rumorose di $a$ e $b$, con verosimiglianza $L_{\mathrm{chim}}(r\mid a,b)$ (Sez.~\ref{sec:chim}).
+\end{enumerate}
+La restrizione a $\Cand_r$ e $\Split_r$ \`e l'approssimazione ``candidate-set'': i riferimenti non colpiti da minimap2 hanno verosimiglianza trascurabile e si escludono, rendendo il calcolo lineare nel numero di allineamenti candidati anzich\'e in $J$.
+
+\section{Modello d'errore indel-aware}\label{sec:err}
+Condizioniamo sull'allineamento riportato da minimap2 (logica pair-HMM~\cite{durbin}): la verosimiglianza \`e il prodotto delle probabilit\`a delle operazioni lungo il cammino di allineamento. Con la categorica per-operazione $\ee=(e_M,e_S,e_I,e_D)$:
+\begin{equation}
+\log L(r\mid j)=\underbrace{n^{rj}_M\log e_M + n^{rj}_S\log e_S + n^{rj}_I\log e_I + n^{rj}_D\log e_D}_{\text{cammino di operazioni}}\;+\;\underbrace{n^{rj}_S\log\tfrac13 + n^{rj}_I\log\tfrac14}_{\text{scelta della base}} .
+\label{eq:Lrj}
+\end{equation}
+\textbf{Spiegazione.} Ogni colonna dell'allineamento \`e un'operazione (match, sostituzione, inserzione, delezione) con probabilit\`a $e_O$; il termine $\log\frac13$ pesa la scelta della base sostituita (3 alternative), $\log\frac14$ quella della base inserita. Match e delezioni sono deterministiche data la reference, quindi non hanno termine di scelta della base. Il carattere \emph{indel-aware} sta nel tenere $e_I$ ed $e_D$ come parametri \emph{liberi e distinti} da $e_S$: l'errore ONT R10 \`e dominato dagli indel, e un modello a sole sostituzioni (come tipico nel corto) sarebbe mis-specificato. I parametri $\ee$ non sono fissati a priori ma \emph{stimati} dai dati (Sez.~\ref{sec:em}), quindi il modello si adatta alla chimica di sequenziamento.
+
+\medskip\noindent\textbf{Nota su clip e copertura.} Poich\'e LOREON impone gi\`a una copertura di query $\ge 90\%$, le code non allineate (soft-clip) sono minime e comparabili tra i candidati $j$ della stessa lettura; la~\eqref{eq:Lrj} \`e quindi valida sulla porzione allineata senza distorsioni sistematiche tra candidati. In alternativa si aggiunge un termine di penalit\`a per base soft-clipped $n^{rj}_{\mathrm{clip}}\log e_{\mathrm{clip}}$.
+
+\section{Componente chimera}\label{sec:chim}
+Per una lettura con split, i due segmenti (colonne $1$ e $2$) mappano a $a$ e $b$ su intervalli disgiunti della query. La verosimiglianza chimerica fattorizza sui segmenti, ciascuno valutato con lo stesso modello d'errore~\eqref{eq:Lrj}:
+\begin{equation}
+L_{\mathrm{chim}}(r\mid a,b)=L^{(1)}(r\mid a)\cdot L^{(2)}(r\mid b),
+\end{equation}
+dove $L^{(s)}$ usa le statistiche sufficienti del solo segmento $s$. \textbf{Spiegazione.} Per una lettura \emph{con} split confrontiamo due ipotesi: (a)~non-chimerica, un unico riferimento $j$ spiega l'intera lettura (eventualmente con un grande indel / variante strutturale); (b)~chimerica, due riferimenti spiegano i due segmenti. \`E una selezione di modello \emph{per lettura}, e $\bpi$ diventa un parametro \emph{stimato} (non un rapporto fisso contato dai supplementary). La versione ``inter-taxon'' restringe $\Split_r$ alle coppie con $\lin(a)\ne\lin(b)$ a un rango scelto.
+
+\section{Verosimiglianza completa}
+Per unificare la notazione, a ogni lettura associamo un insieme di \emph{ipotesi} $\Hyp_r$: le ipotesi ``sorgente singola $j$'' per $j\in\Cand_r$, pi\`u (se $\I^{\mathrm{sp}}_r=1$) le ipotesi ``chimera $(a,b)$'' per $(a,b)\in\Split_r$. La verosimiglianza marginale della lettura \`e la mistura
+\begin{equation}
+P(r\mid\bt,\ee,\bpi)=\big(1-\bpi\,\I^{\mathrm{sp}}_r\big)\!\!\sum_{j\in\Cand_r}\!\!\theta_j\,L(r\mid j)\;+\;\bpi\,\I^{\mathrm{sp}}_r\!\!\sum_{(a,b)\in\Split_r}\!\!\theta_a\theta_b\,L_{\mathrm{chim}}(r\mid a,b),
+\label{eq:Pr}
+\end{equation}
+e la log-verosimiglianza osservata dell'intero campione \`e $\;\ell(\bt,\ee,\bpi)=\sum_{r=1}^{N}\log P(r\mid\bt,\ee,\bpi).$
+
+\section{Stima per Expectation--Maximization}\label{sec:em}
+Introduciamo le variabili latenti complete $z_r$. La log-verosimiglianza \emph{completa} \`e
+\begin{equation}
+\ell_c=\sum_r\Big[\I(c_r{=}0)\big(\log(1-\bpi_r)+\log\theta_{z_r}+\log L(r\mid z_r)\big)+\I(c_r{=}1)\big(\log\bpi+\log\theta_{a_r}+\log\theta_{b_r}+\log L_{\mathrm{chim}}\big)\Big],
+\end{equation}
+con $\bpi_r=\bpi\,\I^{\mathrm{sp}}_r$. L'EM alterna il calcolo delle responsabilit\`a (passo E) e l'aggiornamento dei parametri (passo M) massimizzando la funzione ausiliaria $Q(\Theta\mid\Theta^{\text{old}})=\E_{z\mid r,\Theta^{\text{old}}}[\ell_c]$.
+
+\subsection{Passo E: responsabilit\`a posteriori}
+Dato lo stato corrente $\Theta^{\text{old}}=(\bt,\ee,\bpi)$, per ogni lettura si normalizza sulla mistura~\eqref{eq:Pr}:
+\begin{align}
+\gamma_{rj}&=\Pr(c_r{=}0,z_r{=}j\mid r)=\frac{(1-\bpi_r)\,\theta_j\,L(r\mid j)}{P(r)},\qquad j\in\Cand_r,\label{eq:estep-g}\\
+\rho_{r}(a,b)&=\Pr(c_r{=}1,\text{sorgenti }(a,b)\mid r)=\frac{\bpi\,\theta_a\theta_b\,L_{\mathrm{chim}}(r\mid a,b)}{P(r)},\qquad \rho_r=\!\!\sum_{(a,b)\in\Split_r}\!\!\rho_r(a,b).\label{eq:estep-r}
+\end{align}
+\textbf{Spiegazione.} $\gamma_{rj}$ \`e la probabilit\`a posteriore che la lettura provenga (in modo non-chimerico) dal riferimento $j$; $\rho_r$ quella che sia una chimera. Per costruzione $\sum_{j}\gamma_{rj}+\rho_r=1$. Le $\gamma_{rj}$ sostituiscono i pesi softmax euristici: sono \emph{vere} probabilit\`a posteriori.
+
+\subsection{Passo M: aggiornamento dei parametri}
+\paragraph{Abbondanze $\bt$.} Massimizziamo la parte di $Q$ che dipende da $\bt$,
+$\sum_r\big[\sum_j\gamma_{rj}\log\theta_j+\sum_{(a,b)}\rho_r(a,b)(\log\theta_a+\log\theta_b)\big]$,
+sotto il vincolo $\sum_j\theta_j=1$. Con il moltiplicatore di Lagrange $\lambda$:
+\[
+\frac{\partial}{\partial\theta_j}\Big[\,\cdot\, -\lambda\big(\textstyle\sum_k\theta_k-1\big)\Big]=\frac{n_j}{\theta_j}-\lambda=0
+\;\Rightarrow\;\theta_j=\frac{n_j}{\lambda},\quad \lambda=\sum_k n_k,
+\]
+da cui l'aggiornamento in forma chiusa
+\begin{equation}
+\boxed{\;\theta_j\;=\;\frac{n_j}{\sum_k n_k},\qquad n_j=\sum_r\gamma_{rj}+\sum_r\!\!\sum_{(a,b)\in\Split_r}\!\!\rho_r(a,b)\,\big[\I(a{=}j)+\I(b{=}j)\big].\;}
+\label{eq:mstep-theta}
+\end{equation}
+\textbf{Spiegazione.} $n_j$ \`e il numero \emph{atteso} di molecole-sorgente attribuite al riferimento $j$: ogni lettura non-chimerica contribuisce $\gamma_{rj}$, ogni chimera contribuisce a entrambi i suoi genitori. Questo \emph{\`e} l'EM di abbondanza (come Bracken/Emu), ma ora accoppiato all'errore e alle chimere. (Opzione: definire un'abbondanza ``pulita'' escludendo i contributi chimerici.)
+
+\paragraph{Tasso di chimere $\bpi$.} Solo le letture con split ($r\in\mathcal{R}_{\mathrm{sp}}$) informano $\bpi$. Massimizzando $\sum_{r\in\mathcal{R}_{\mathrm{sp}}}[\rho_r\log\bpi+(1-\rho_r)\log(1-\bpi)]$:
+\begin{equation}
+\boxed{\;\bpi=\frac{1}{|\mathcal{R}_{\mathrm{sp}}|}\sum_{r\in\mathcal{R}_{\mathrm{sp}}}\rho_r.\;}
+\label{eq:mstep-pi}
+\end{equation}
+
+\paragraph{Modello d'errore $\ee$.} \`E l'MLE pesato di una categorica. Sia $w_{rh}$ la responsabilit\`a dell'ipotesi $h$ (una $\gamma_{rj}$ o una $\rho_r(a,b)$) e $n^{rh}_O$ il conteggio dell'operazione $O$ sotto quell'ipotesi (per le chimere, somma sui due segmenti). Massimizzando $\sum_{r,h}w_{rh}\sum_O n^{rh}_O\log e_O$ sotto $\sum_O e_O=1$:
+\begin{equation}
+\boxed{\;e_O=\frac{\sum_{r,h}w_{rh}\,n^{rh}_O}{\sum_{r,h}w_{rh}\,N^{rh}}\quad(O\in\{M,S,I,D\}),\;}
+\label{eq:mstep-e}
+\end{equation}
+cio\`e la frazione attesa di colonne di tipo $O$ sul totale. \textbf{Spiegazione.} Il modello d'errore si ``allena'' sui dati stessi: $e_I,e_D$ convergono ai tassi reali di inserzione/delezione della chimica, catturando l'errore indel-dominante senza doverlo fissare a mano.
+
+\subsection{Variante MAP con prior di Dirichlet}
+Per stabilizzare i riferimenti rari si pone $\bt\sim\text{Dirichlet}(\alpha)$; l'aggiornamento~\eqref{eq:mstep-theta} diventa $\theta_j=\big(n_j+\alpha_j-1\big)/\sum_k\big(n_k+\alpha_k-1\big)$ (per $\alpha_j\ge1$). Un $\alpha$ debolmente informativo evita che il rumore azzeri o gonfi taxa marginali.
+
+\subsection{Garanzia di monotonia, inizializzazione, convergenza}
+Per la disuguaglianza di Jensen, $\ell(\Theta)-\ell(\Theta^{\text{old}})\ge Q(\Theta\mid\Theta^{\text{old}})-Q(\Theta^{\text{old}}\mid\Theta^{\text{old}})\ge0$: ogni iterazione EM \emph{non diminuisce} la log-verosimiglianza osservata. Si inizializza $\bt^{(0)}$ dai conteggi primari normalizzati (\emph{warm start}), $\ee^{(0)}$ da stime di errore ONT di letteratura, $\bpi^{(0)}$ dalla frazione grezza di letture con split. Criterio d'arresto: $\Delta\ell<\varepsilon_{\mathrm{tol}}$ o numero massimo di iterazioni; per attenuare gli ottimi locali si usano restart multipli e si tiene la soluzione a $\ell$ massima.
+
+\section{Risoluzione tassonomica posteriore e unit\`a adattive}
+Dalla parte non-chimerica normalizziamo la posteriore per-lettura $\tilde\gamma_{rj}=\gamma_{rj}/\sum_{k}\gamma_{rk}$. Per un nodo tassonomico $t$ a un dato rango, la massa posteriore \`e $\Gamma_r(t)=\sum_{j:\,t\in\lin(j)}\tilde\gamma_{rj}$. La \emph{profondit\`a di consenso} della lettura \`e il rango pi\`u profondo in cui un singolo nodo cattura almeno $\tau$ della massa:
+\begin{equation}
+d_r=\max\Big\{\text{rango }\ell:\ \max_{t\ \text{al rango }\ell}\Gamma_r(t)\ge\tau\Big\}.
+\end{equation}
+\textbf{Spiegazione.} \`E il consenso pesato della versione euristica, ma ora $\Gamma_r$ \`e una \emph{probabilit\`a posteriore} del modello congiunto, non una softmax. La qualit\`a di un'OTU \`e riassunta dalla distribuzione delle $d_r$ delle sue letture e dal support medio $\max_t\Gamma_r(t)$.
+
+\paragraph{Identificabilit\`a e unit\`a adattive.} Se due riferimenti $j,j'$ sono quasi indistinguibili dal marcatore, $L(r\mid j)\approx L(r\mid j')$ e la verosimiglianza \`e piatta lungo $\theta_j+\theta_{j'}=\text{cost}$: le abbondanze \emph{individuali} non sono identificabili, ma la loro \emph{somma} lo \`e. Si riporta perci\`o ogni taxon all'\emph{unit\`a a risoluzione adattiva}: il nodo tassonomico pi\`u fine il cui intervallo di credibilit\`a (Sez.~\ref{sec:unc}) esclude lo zero. Il limite di identificabilit\`a diventa cos\`i una propriet\`a dichiarata, non un errore nascosto.
+
+\section{Quantificazione dell'incertezza e calibrazione}\label{sec:unc}
+Essendo un modello di verosimiglianza, l'incertezza si ottiene per \emph{bootstrap non parametrico} sulle letture:
+\begin{enumerate}[nosep,leftmargin=1.4em]
+\item per $b=1,\dots,B$: ricampiona $N$ letture con reinserimento; rifit dell'EM (warm-started) $\Rightarrow \bt^{(b)}$;
+\item intervallo di credibilit\`a al $(1-\alpha)$ per $\theta_j$: percentili $[\,\alpha/2,\,1-\alpha/2\,]$ di $\{\theta_j^{(b)}\}_b$;
+\item indici di diversit\`a con incertezza: per ogni $b$ si calcolano Shannon $H^{(b)}=-\sum_j\theta_j^{(b)}\log\theta_j^{(b)}$ e Chao1, ottenendo i rispettivi CI.
+\end{enumerate}
+\textbf{Calibrazione (il risultato-chiave).} Su comunit\`a mock a composizione nota $\bt^\star$, la \emph{copertura empirica} al livello nominale $1-\alpha$ \`e
+\begin{equation}
+\mathrm{cov}(1-\alpha)=\frac{1}{J}\sum_{j=1}^{J}\I\big(\theta_j^\star\in \mathrm{CI}_j^{1-\alpha}\big).
+\end{equation}
+Il metodo \`e ben calibrato se $\mathrm{cov}(1-\alpha)\approx 1-\alpha$ (curva di calibrazione vicina alla diagonale). \`E la propriet\`a statistica che nessuno strumento di metabarcoding riporta oggi e che costituisce il cuore del contributo. In alternativa al bootstrap, un prior di Dirichlet consente una posteriore variazionale/Gibbs su $\bt$.
+
+\section{Algoritmo e complessit\`a}
+\noindent\fbox{\begin{minipage}{0.97\linewidth}\small
+\textbf{Algoritmo (fit del modello).}
+\begin{enumerate}[nosep,leftmargin=1.4em]
+\item Costruisci la tabella candidati per-lettura $\{\Cand_r,\Split_r,(n^{rj}_O)\}$ da una passata sul BAM.
+\item Inizializza $\bt,\ee,\bpi$ (warm start).
+\item \textbf{ripeti}: E-step \eqref{eq:estep-g}--\eqref{eq:estep-r}; M-step \eqref{eq:mstep-theta}--\eqref{eq:mstep-e}; \textbf{finch\'e} $\Delta\ell<\varepsilon_{\mathrm{tol}}$.
+\item \textbf{bootstrap} $B$ volte (parallelo) $\Rightarrow$ CI su $\bt$ e diversit\`a.
+\item Aggrega le posteriori sull'albero $\Rightarrow$ risoluzione, unit\`a adattive, output.
+\end{enumerate}
+\end{minipage}}
+
+\medskip\noindent Il costo per iterazione EM \`e $O\!\big(\sum_r|\Hyp_r|\big)$, lineare nel numero totale di allineamenti candidati (non in $J$). Il bootstrap moltiplica per $B$ ma \`e imbarazzantemente parallelo. La memoria \`e dominata dalla tabella candidati (sparsa) e dall'indice minimap2; il bootstrap ricampiona indici, non copia i dati.
+
+\section{Protocollo di benchmark}
+Il benchmark \`e ci\`o che regge la pubblicazione: deve dimostrare accuratezza, calibrazione e generalit\`a rispetto agli strumenti esistenti.
+
+\paragraph{Dataset.} Comunit\`a \emph{mock} a composizione nota, pubblicate, su pi\`u marcatori e regni: mock fungine ITS (composizioni even e staggered) e mock batteriche 16S (es.\ ZymoBIOMICS); dove possibile l'operone rRNA full-length. Verit\`a di riferimento $\bt^\star$ nota. Campioni ambientali reali per la valutazione qualitativa. Almeno due chimiche ONT (es.\ R9.4.1 e R10.4.1) per la robustezza.
+
+\paragraph{Baseline (confronto testa-a-testa).}
+\begin{enumerate}[nosep,leftmargin=1.4em]
+\item conteggio solo-primary; \quad (2)~best-hit; \quad (3)~consenso/LCA stile MEGAN~\cite{megan}/Kraken2~\cite{kraken2};
+\item ri-stima stile Bracken~\cite{bracken}; \quad (5)~\textbf{Emu}~\cite{emu} (EM long-read, prior art diretto);
+\item \textbf{TaxQuality euristico} (consenso $+$ EM $+$ chimera separati) come \emph{ablazione} interna.
+\end{enumerate}
+
+\paragraph{Metriche.}
+\emph{Accuratezza dell'abbondanza}: dissimilarit\`a di Bray--Curtis e distanza di Aitchison (CLR) da $\bt^\star$, errore $L_1$, correlazione di Spearman.
+\emph{Ricchezza/risoluzione}: numero di OTU-specie spurie, tasso di over-split, valutati sulle unit\`a adattive.
+\emph{Calibrazione (metrica-novit\`a)}: copertura dei CI ai livelli nominali, curva di calibrazione, ampiezza degli intervalli.
+\emph{Chimere}: precisione/recall e AUROC contro chimere note (spike-in in silico e/o sperimentali).
+
+\paragraph{Ablazione e generalit\`a.} Dimostrare che il modello congiunto $\ge$ somma delle tre euristiche (baseline~6) sull'accuratezza \emph{e} che fornisce, unico, CI calibrati. Ripetere su $\ge2$ marcatori, $\ge2$ regni e $\ge2$ chimiche, riportando la consistenza dei risultati (l'elemento che parla di ``metodo generale'').
+
+\paragraph{Analisi statistica e criteri di successo.} Test appaiati tra repliche/campioni con dimensioni d'effetto; criteri fissati \emph{a priori}: (i)~Bray--Curtis inferiore a tutte le baseline con $p<0.05$; (ii)~copertura dei CI entro $\pm5$ punti percentuali dal nominale; (iii)~AUROC chimere $>0.9$. Tutto containerizzato, dati e seed pubblici per la riproducibilit\`a.
+
+\section{Parametri e default proposti}
+\begin{table}[h]\centering\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+Parametro & Ruolo & Default proposto\\
+\midrule
+\texttt{-N}, \texttt{-p} (minimap2) & ampiezza dei candidati secondari & $N{=}20$, $p{=}0.5$\\
+$\ee^{(0)}$ & errore iniziale (M,S,I,D) & da letteratura ONT R10, poi stimato\\
+$\bpi^{(0)}$ & tasso chimere iniziale & frazione grezza di letture con split\\
+$\tau$ & soglia di consenso posteriore & $0.9$\\
+$\alpha$ (Dirichlet) & regolarizzazione di $\bt$ & debole (es.\ $\alpha_j{=}1{+}\epsilon$)\\
+$B$ & repliche bootstrap & $200$--$1000$\\
+$\varepsilon_{\mathrm{tol}}$ & tolleranza di convergenza & $10^{-6}$ su $\ell$\\
+\bottomrule
+\end{tabular}
+\caption{Parametri del modello e valori di partenza consigliati.}
+\end{table}
+
+\begin{thebibliography}{99}\small
+\bibitem{dempster} Dempster AP, Laird NM, Rubin DB (1977). Maximum likelihood from incomplete data via the EM algorithm. \emph{J. R. Stat. Soc. B} 39(1):1--38. \url{https://doi.org/10.1111/j.2517-6161.1977.tb01600.x}
+\bibitem{durbin} Durbin R, Eddy SR, Krogh A, Mitchison G (1998). \emph{Biological Sequence Analysis: Probabilistic Models of Proteins and Nucleic Acids}. Cambridge University Press.
+\bibitem{minimap2} Li H (2018). Minimap2: pairwise alignment for nucleotide sequences. \emph{Bioinformatics} 34(18):3094--3100. \url{https://doi.org/10.1093/bioinformatics/bty191}
+\bibitem{rsem} Li B, Dewey CN (2011). RSEM: accurate transcript quantification from RNA-Seq data. \emph{BMC Bioinformatics} 12:323. \url{https://doi.org/10.1186/1471-2105-12-323}
+\bibitem{kallisto} Bray NL, Pimentel H, Melsted P, Pachter L (2016). Near-optimal probabilistic RNA-seq quantification. \emph{Nat. Biotechnol.} 34:525--527. \url{https://doi.org/10.1038/nbt.3519}
+\bibitem{salmon} Patro R, Duggal G, Love MI, Irizarry RA, Kingsford C (2017). Salmon provides fast and bias-aware quantification of transcript expression. \emph{Nat. Methods} 14:417--419. \url{https://doi.org/10.1038/nmeth.4197}
+\bibitem{bracken} Lu J, Breitwieser FP, Thielen P, Salzberg SL (2017). Bracken: estimating species abundance in metagenomics data. \emph{PeerJ Comput. Sci.} 3:e104. \url{https://doi.org/10.7717/peerj-cs.104}
+\bibitem{emu} Curry KD, Wang Q, Nute MG, et al. (2022). Emu: species-level microbial community profiling of full-length 16S rRNA Oxford Nanopore sequencing data. \emph{Nat. Methods} 19:845--853. \url{https://doi.org/10.1038/s41592-022-01520-4}
+\bibitem{megan} Huson DH, Auch AF, Qi J, Schuster SC (2007). MEGAN analysis of metagenomic data. \emph{Genome Res.} 17:377--386. \url{https://doi.org/10.1101/gr.5969107}
+\bibitem{kraken2} Wood DE, Lu J, Langmead B (2019). Improved metagenomic analysis with Kraken 2. \emph{Genome Biol.} 20:257. \url{https://doi.org/10.1186/s13059-019-1891-0}
+\bibitem{koljalg} K\~oljalg U, Nilsson RH, Abarenkov K, et al. (2013). Towards a unified paradigm for sequence-based identification of Fungi. \emph{Mol. Ecol.} 22(21):5271--5277. \url{https://doi.org/10.1111/mec.12481}
+\bibitem{schoch} Schoch CL, Seifert KA, Huhndorf S, et al. (2012). Nuclear ribosomal ITS region as a universal DNA barcode marker for Fungi. \emph{PNAS} 109(16):6241--6246. \url{https://doi.org/10.1073/pnas.1117018109}
+\bibitem{uchime} Edgar RC, Haas BJ, Clemente JC, Quince C, Knight R (2011). UCHIME improves sensitivity and speed of chimera detection. \emph{Bioinformatics} 27(16):2194--2200. \url{https://doi.org/10.1093/bioinformatics/btr381}
+\bibitem{asv} Callahan BJ, McMurdie PJ, Holmes SP (2017). Exact sequence variants should replace operational taxonomic units. \emph{ISME J.} 11:2639--2643. \url{https://doi.org/10.1038/ismej.2017.119}
+\end{thebibliography}
+
+\vspace{0.3cm}\noindent\footnotesize\textcolor{gray}{Documento di design: descrive una ri-progettazione proposta, non ancora implementata. I riferimenti primari sono stati verificati sull'editore; Emu \`e citato come prior art diretto contro cui posizionare il contributo.}
+
+\end{document}

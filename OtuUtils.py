@@ -221,10 +221,18 @@ def filter_and_merge_directory(
 # ---------------------------------------------------------------------------
 
 def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: str,
-                     kmer_size: int = 15, window_size: int = 10, debug: bool = False):
+                     kmer_size: int = 15, window_size: int = 10, debug: bool = False,
+                     tax_quality_mode: bool = False, sec_N: int = 20, sec_p: float = 0.5):
     """OPT-A2: Pipe minimap2 → samtools sort → BAM (eliminates SAM file on disk).
 
     Returns the path to the sorted BAM file, or None on failure.
+
+    tax_quality_mode: when True, minimap2 is run so that secondary alignments
+    are retained (`-N <sec_N> -p <sec_p>`) instead of the default
+    `--secondary=no`.  This exposes the taxonomic-ambiguity signal (multiple
+    references per read) needed by the Taxonomic-Quality / EM pass.  It inflates
+    the BAM by ~20-30%, so it is strictly opt-in; when False the command is
+    bit-for-bit identical to the historical pipeline.
     """
     try:
         fastq_path = Path(fastq_file)
@@ -255,10 +263,20 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
     # Previously minimap2 emitted up to 5 secondary per read and they were
     # all discarded later by `samtools view -F 0x904`, wasting I/O and
     # BAM size (~20-30%). Disable them at the source.
+    #
+    # Taxonomic-Quality / EM mode re-enables the secondary tail: with the
+    # minimap2 defaults (-p 0.8 -N 5) only secondaries within 80% of the
+    # primary chaining score are emitted, so the ambiguity distribution is
+    # truncated and per-read entropy is artificially low.  `-N 20 -p 0.5`
+    # exposes the real tail needed to quantify assignment ambiguity.
+    if tax_quality_mode:
+        secondary_args = ['-N', str(sec_N), '-p', str(sec_p)]
+    else:
+        secondary_args = ['--secondary=no']
     cmd_mm2 = [
         'minimap2',
         '-ax', 'map-ont',
-        '--secondary=no',
+        *secondary_args,
         '-t', thread_str,
         '-k', str(kmer_size),
         '-w', str(window_size),
@@ -332,9 +350,16 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
 # ---------------------------------------------------------------------------
 
 def _parse_flagstat(flagstat_output: str) -> dict:
-    """Parse samtools flagstat output and return primary read counts."""
+    """Parse samtools flagstat output and return primary read counts.
+
+    Also captures the `supplementary` line (split/chimeric alignments, flag
+    0x800).  These are already present in the full BAM even when secondary
+    alignments are suppressed, so the split-read/chimera proxy is available
+    at zero extra cost (Feature C, Tier 1).
+    """
     total = 0
     mapped = 0
+    supplementary = 0
     for line in flagstat_output.splitlines():
         parts = line.split()
         if not parts:
@@ -343,11 +368,13 @@ def _parse_flagstat(flagstat_output: str) -> dict:
             count = int(parts[0])
         except ValueError:
             continue
-        if 'primary' in line and 'mapped' in line and 'secondary' not in line and 'supplementary' not in line:
+        if 'supplementary' in line:
+            supplementary = count
+        elif 'primary' in line and 'mapped' in line and 'secondary' not in line:
             mapped = count
         elif 'primary' in line and 'mapped' not in line and 'duplicate' not in line:
             total = count
-    return {'total': total, 'mapped': mapped}
+    return {'total': total, 'mapped': mapped, 'supplementary': supplementary}
 
 
 def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
@@ -387,23 +414,27 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         print(f"[{fname}] Error in path setup: {e}")
         return None
 
-    # Build optional samtools -e expression for quality filters
-    # NOTE (OPT-B1): coverage is now computed as QUERY coverage (alen/qlen).
-    # The previous formula `alen*100>=X*rlen` was semantically wrong: in
-    # htslib filter expressions `rlen` is the reference consumption of THIS
-    # alignment (M+D from CIGAR), not the full reference length — so the
-    # ratio measured insertion/deletion balance rather than "% of reference
-    # covered". Query coverage (fraction of the read that actually aligned,
-    # excluding soft clips) is the meaningful quantity for metabarcoding
-    # amplicons: reads should align ≥90% of their own length.
+    # Build optional samtools -e expression for quality filters.
+    #
+    # NOTE (OPT-B1): coverage is computed as QUERY coverage (aligned/qlen).
+    # The aligned query length (bases of the read inside the alignment,
+    # excluding soft clips) is `qlen - sclen` in htslib filter syntax:
+    # `qlen` is the full read length and `sclen` the soft-clipped length.
+    #
+    # BUGFIX: the previous expressions used a bare `alen` token, which is NOT
+    # a valid htslib filter variable — every quality-filtered run failed with
+    # "Couldn't process filter expression" on modern samtools (≥1.16),
+    # producing an EMPTY OTU table whenever --min-percent-identity or
+    # --min-ref-coverage was > 0 (both default to 95 / 90). `alen` is
+    # replaced by `(qlen-sclen)`, its intended meaning.
     quality_conditions = []
     if min_percent_identity > 0.0:
         quality_conditions.append(
-            f"(alen-[NM])*100>={min_percent_identity}*alen"
+            f"((qlen-sclen)-[NM])*100>={min_percent_identity}*(qlen-sclen)"
         )
     if min_ref_coverage > 0.0:
         quality_conditions.append(
-            f"alen*100>={min_ref_coverage}*qlen"
+            f"(qlen-sclen)*100>={min_ref_coverage}*qlen"
         )
     e_filter_args = []          # list form for Popen (cross-platform safe)
     if quality_conditions:
@@ -434,6 +465,16 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         mapping_stats['mapped_unfiltered'] = stats_raw['mapped']
         if stats_raw['total'] > 0:
             mapping_stats['mapping_rate_pct'] = round(stats_raw['mapped'] / stats_raw['total'] * 100, 2)
+
+        # Feature C (Tier 1): split/chimera proxy from the supplementary line.
+        # supplementary_count = number of split-alignment segments (flag 0x800).
+        # chimera_rate_raw = supplementary segments per primary-mapped read.
+        supp_count = stats_raw.get('supplementary', 0)
+        mapping_stats['supplementary_count'] = supp_count
+        mapping_stats['chimera_rate_raw_pct'] = (
+            round(supp_count / stats_raw['mapped'] * 100, 2)
+            if stats_raw['mapped'] > 0 else 0.0
+        )
 
         # Compute ll1 (unmapped count before filter) from flagstat
         ll1_unmapped = stats_raw['total'] - stats_raw['mapped']
