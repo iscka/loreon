@@ -67,6 +67,15 @@ except ImportError:
     print("ERROR: Cannot find 'pipeline_worker.py'.")
     sys.exit(1)
 
+try:
+    from OtuUtils import (
+        LENGTH_PRESETS, LENGTH_PRESET_LABELS, format_length_report,
+        sample_read_lengths, suggest_length_window, summarize_lengths
+    )
+except ImportError:
+    print("ERROR: Cannot find 'OtuUtils.py'.")
+    sys.exit(1)
+
 
 class DockerBuildDialog(QDialog):
     """Dialog that runs 'docker build' and shows live output."""
@@ -177,6 +186,36 @@ class CreditsDialog(QDialog):
         self.setLayout(layout)
 
 
+class ReadLengthDialog(QDialog):
+    """Dialog showing the read-length distribution found in the input folder."""
+
+    def __init__(self, lengths, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Read lengths in the input folder")
+        self.setMinimumSize(700, 640)
+        self.suggested_window = suggest_length_window(summarize_lengths(lengths))
+        self.report_text = format_length_report(lengths)
+
+        layout = QVBoxLayout()
+        report = QPlainTextEdit()
+        report.setReadOnly(True)
+        report.setLineWrapMode(QPlainTextEdit.NoWrap)
+        report.setStyleSheet("font-family: 'Courier New', monospace;")
+        report.setPlainText(self.report_text)
+        layout.addWidget(report)
+
+        low, high = self.suggested_window
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        apply_button = buttons.addButton(f"Use {low}–{high} bp", QDialogButtonBox.AcceptRole)
+        apply_button.setToolTip(
+            "Set a custom length window that holds the central 90 % of the reads."
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        self.setLayout(layout)
+
+
 class MainWindow(QMainWindow):
     start_pipeline_signal = pyqtSignal(dict)
     stop_pipeline_signal = pyqtSignal()
@@ -187,6 +226,8 @@ class MainWindow(QMainWindow):
         self.setGeometry(100, 100, 900, 750)
         self.is_running = False
         self._log_file = None
+        self._run_warning = None
+        self._applying_preset = False
         icon = _load_icon()
         self.setWindowIcon(icon)
         self.init_ui()
@@ -269,43 +310,67 @@ class MainWindow(QMainWindow):
         options_left_layout.addWidget(self.flat_sh_check)
         options_layout.addLayout(options_left_layout)
 
-        filter_box = QGroupBox("Read & Alignment Filter")
+        filter_box = QGroupBox("Read && Alignment Filter")
         filter_layout = QGridLayout()
-        self.filter_check = QCheckBox("Enable Length Filter")
-        self.filter_check.setChecked(True)
+        self.length_mode_combo = QComboBox()
+        self.length_mode_combo.addItem("No length filter", None)
+        self.length_mode_combo.addItem("Custom range", 'custom')
+        for preset_name, (preset_min, preset_max) in LENGTH_PRESETS.items():
+            self.length_mode_combo.addItem(
+                f"{LENGTH_PRESET_LABELS[preset_name]} ({preset_min}–{preset_max} bp)",
+                preset_name
+            )
+        self.length_mode_combo.setToolTip(
+            "Read-length window: reads outside it are discarded before mapping.\n"
+            "Choose the preset of your amplicon, or 'Custom range' to type the limits.\n"
+            "'Scan read lengths' shows the lengths found in the input folder."
+        )
         self.min_len_input = QSpinBox()
-        self.min_len_input.setRange(0, 99999)
-        self.min_len_input.setValue(200)
+        self.min_len_input.setRange(0, 999999)
+        self.min_len_input.setValue(0)
+        self.min_len_input.setEnabled(False)
         self.max_len_input = QSpinBox()
-        self.max_len_input.setRange(0, 99999)
-        self.max_len_input.setValue(300)
+        self.max_len_input.setRange(0, 999999)
+        self.max_len_input.setValue(0)
+        self.max_len_input.setSpecialValueText("no limit")
+        self.max_len_input.setToolTip("Maximum read length in bp (0 = no upper limit).")
+        self.max_len_input.setEnabled(False)
+        self.scan_lengths_btn = QPushButton("Scan read lengths...")
+        self.scan_lengths_btn.setToolTip(
+            "Read a sample of the input folder and show the distribution of read\n"
+            "lengths, with the share of reads that each preset would keep."
+        )
         self.min_identity_input = QDoubleSpinBox()
         self.min_identity_input.setRange(0.0, 100.0)
         self.min_identity_input.setSingleStep(0.5)
         self.min_identity_input.setDecimals(1)
-        self.min_identity_input.setValue(95.0)
+        self.min_identity_input.setValue(0.0)
         self.min_identity_input.setToolTip(
             "Minimum percent identity for mapped reads (0 = disabled).\n"
+            "Identity is computed on the aligned part of the read.\n"
             "E.g. 97.0 keeps only alignments with ≥97% identity."
         )
         self.min_ref_cov_input = QDoubleSpinBox()
         self.min_ref_cov_input.setRange(0.0, 100.0)
         self.min_ref_cov_input.setSingleStep(1.0)
         self.min_ref_cov_input.setDecimals(1)
-        self.min_ref_cov_input.setValue(90.0)
+        self.min_ref_cov_input.setValue(0.0)
         self.min_ref_cov_input.setToolTip(
-            "Minimum reference coverage for mapped reads (0 = disabled).\n"
-            "E.g. 80.0 keeps only alignments covering ≥80% of the reference."
+            "Minimum read coverage for mapped reads (0 = disabled).\n"
+            "E.g. 80.0 keeps only reads aligned over ≥80% of their length.\n"
+            "Reads longer than the reference sequences cannot reach high values."
         )
-        filter_layout.addWidget(self.filter_check, 0, 0, 1, 2)
+        filter_layout.addWidget(QLabel("Length filter:"), 0, 0)
+        filter_layout.addWidget(self.length_mode_combo, 0, 1)
         filter_layout.addWidget(QLabel("Min Len:"), 1, 0)
         filter_layout.addWidget(self.min_len_input, 1, 1)
         filter_layout.addWidget(QLabel("Max Len:"), 2, 0)
         filter_layout.addWidget(self.max_len_input, 2, 1)
-        filter_layout.addWidget(QLabel("Min Identity (%):"), 3, 0)
-        filter_layout.addWidget(self.min_identity_input, 3, 1)
-        filter_layout.addWidget(QLabel("Min Ref Cov (%):"), 4, 0)
-        filter_layout.addWidget(self.min_ref_cov_input, 4, 1)
+        filter_layout.addWidget(self.scan_lengths_btn, 3, 0, 1, 2)
+        filter_layout.addWidget(QLabel("Min Identity (%):"), 4, 0)
+        filter_layout.addWidget(self.min_identity_input, 4, 1)
+        filter_layout.addWidget(QLabel("Min Read Cov (%):"), 5, 0)
+        filter_layout.addWidget(self.min_ref_cov_input, 5, 1)
         filter_box.setLayout(filter_layout)
         options_layout.addWidget(filter_box)
 
@@ -351,10 +416,21 @@ class MainWindow(QMainWindow):
         self.job_threads_input.valueChanged.connect(self._update_parallel_jobs_hint)
         perf_layout.addWidget(self.parallel_jobs_hint, 2, 0, 1, 2)
 
+        self.sample_timeout_input = QSpinBox()
+        self.sample_timeout_input.setRange(0, 100000)
+        self.sample_timeout_input.setValue(0)
+        self.sample_timeout_input.setSpecialValueText("no limit")
+        self.sample_timeout_input.setToolTip(
+            "Maximum time, in minutes, for mapping and counting one sample.\n"
+            "A sample that exceeds it is stopped and reported as failed (0 = no limit)."
+        )
+
         perf_layout.addWidget(QLabel("K-mer (-k):"), 3, 0)
         perf_layout.addWidget(self.kmer_input, 3, 1)
         perf_layout.addWidget(QLabel("Window (-w):"), 4, 0)
         perf_layout.addWidget(self.window_input, 4, 1)
+        perf_layout.addWidget(QLabel("Max min/sample:"), 5, 0)
+        perf_layout.addWidget(self.sample_timeout_input, 5, 1)
         perf_box.setLayout(perf_layout)
         options_layout.addWidget(perf_box)
         options_group.setLayout(options_layout)
@@ -420,7 +496,10 @@ class MainWindow(QMainWindow):
         self.input_dir_btn.clicked.connect(lambda: self.select_directory(self.input_dir_label))
         self.output_dir_btn.clicked.connect(lambda: self.select_directory(self.output_dir_label))
         self.db_btn.clicked.connect(lambda: self.select_file(self.db_label, "Database FASTA (*.fasta *.fa)"))
-        self.filter_check.stateChanged.connect(self.toggle_filter_inputs)
+        self.length_mode_combo.currentIndexChanged.connect(self._on_length_mode_changed)
+        self.min_len_input.valueChanged.connect(self._on_length_value_edited)
+        self.max_len_input.valueChanged.connect(self._on_length_value_edited)
+        self.scan_lengths_btn.clicked.connect(self.scan_read_lengths)
         self.run_btn.clicked.connect(self.run_pipeline)
         self.stop_btn.clicked.connect(self.stop_pipeline)
 
@@ -449,6 +528,7 @@ class MainWindow(QMainWindow):
         self.worker.log_signal.connect(self.append_log)
         self.worker.progress_signal.connect(self.update_progress)
         self.worker.finished_signal.connect(self.pipeline_finished)
+        self.worker.warning_signal.connect(self.on_worker_warning)
         self.worker_thread.start()
 
     def select_directory(self, label_widget):
@@ -461,10 +541,80 @@ class MainWindow(QMainWindow):
         if file_path:
             label_widget.setText(file_path)
 
-    def toggle_filter_inputs(self, state):
-        is_enabled = (state == 2)
-        self.min_len_input.setEnabled(is_enabled)
-        self.max_len_input.setEnabled(is_enabled)
+    def _on_length_mode_changed(self, _index=None):
+        """Enable the length limits and fill them when a preset is chosen."""
+        mode = self.length_mode_combo.currentData()
+        self.min_len_input.setEnabled(mode is not None)
+        self.max_len_input.setEnabled(mode is not None)
+        if mode in LENGTH_PRESETS:
+            preset_min, preset_max = LENGTH_PRESETS[mode]
+            self._applying_preset = True
+            try:
+                self.min_len_input.setValue(preset_min)
+                self.max_len_input.setValue(preset_max)
+            finally:
+                self._applying_preset = False
+
+    def _on_length_value_edited(self, _value=None):
+        """Switch from a preset to the custom range when a limit is changed by hand."""
+        if self._applying_preset:
+            return
+        if self.length_mode_combo.currentData() in LENGTH_PRESETS:
+            self.length_mode_combo.setCurrentIndex(self.length_mode_combo.findData('custom'))
+
+    def scan_read_lengths(self):
+        """Show the read-length distribution of the input folder and offer a window."""
+        input_dir = self.input_dir_label.text().strip()
+        if not input_dir or not Path(input_dir).is_dir():
+            QMessageBox.warning(self, "Input folder missing",
+                                "Select the input folder first.")
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            lengths = sample_read_lengths(input_dir)
+        finally:
+            QApplication.restoreOverrideCursor()
+        if not lengths:
+            QMessageBox.warning(self, "No reads found",
+                                "No FASTQ reads were found in the input folder.")
+            return
+        dialog = ReadLengthDialog(lengths, self)
+        if dialog.exec_() == QDialog.Accepted:
+            low, high = dialog.suggested_window
+            self.length_mode_combo.setCurrentIndex(self.length_mode_combo.findData('custom'))
+            self.min_len_input.setValue(low)
+            self.max_len_input.setValue(high)
+
+    def on_worker_warning(self, text):
+        """Remember a problem reported by the worker, to show it when the run ends."""
+        self._run_warning = text
+        self.append_log(f"[WARNING] {text}")
+
+    def collect_settings(self):
+        """Return the pipeline settings currently shown in the window."""
+        return {
+            "input_dir": self.input_dir_label.text(),
+            "output_dir": self.output_dir_label.text(),
+            "db_path": self.db_label.text(),
+            "format": self.format_combo.currentText(),
+            "debug": self.debug_check.isChecked(),
+            "enable_filter": self.length_mode_combo.currentData() is not None,
+            "min_len": self.min_len_input.value(),
+            "max_len": self.max_len_input.value(),
+            "min_percent_identity": self.min_identity_input.value(),
+            "min_ref_coverage": self.min_ref_cov_input.value(),
+            "total_threads": self.total_threads_input.value(),
+            "threads_per_job": self.job_threads_input.value(),
+            "kmer_size": self.kmer_input.value(),
+            "window_size": self.window_input.value(),
+            "sample_timeout_min": self.sample_timeout_input.value(),
+            "open_report": self.open_report_check.isChecked(),
+            "force_tax_map": self.force_tax_map_check.isChecked(),
+            "profile": self.profile_check.isChecked(),
+            "delete_bam": self.delete_bam_check.isChecked(),
+            "flat_sh": self.flat_sh_check.isChecked(),
+            "use_docker": self.docker_check.isChecked(),
+        }
 
     def append_log(self, text):
         stamped = f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {text}"
@@ -541,6 +691,7 @@ class MainWindow(QMainWindow):
             return
 
         self.log_output.clear()
+        self._run_warning = None
 
         try:
             log_path = Path(self.output_dir_label.text()) / "pipeline.log"
@@ -553,28 +704,7 @@ class MainWindow(QMainWindow):
         if use_docker:
             self.append_log(f"[INFO] Docker mode: pipeline will run inside '{DOCKER_IMAGE}'")
 
-        settings = {
-            "input_dir": self.input_dir_label.text(),
-            "output_dir": self.output_dir_label.text(),
-            "db_path": self.db_label.text(),
-            "format": self.format_combo.currentText(),
-            "debug": self.debug_check.isChecked(),
-            "enable_filter": self.filter_check.isChecked(),
-            "min_len": self.min_len_input.value(),
-            "max_len": self.max_len_input.value(),
-            "min_percent_identity": self.min_identity_input.value(),
-            "min_ref_coverage": self.min_ref_cov_input.value(),
-            "total_threads": self.total_threads_input.value(),
-            "threads_per_job": self.job_threads_input.value(),
-            "kmer_size": self.kmer_input.value(),
-            "window_size": self.window_input.value(),
-            "open_report": self.open_report_check.isChecked(),
-            "force_tax_map": self.force_tax_map_check.isChecked(),
-            "profile": self.profile_check.isChecked(),
-            "delete_bam": self.delete_bam_check.isChecked(),
-            "flat_sh": self.flat_sh_check.isChecked(),
-            "use_docker": use_docker,
-        }
+        settings = self.collect_settings()
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
             QMessageBox.critical(self, "Error", "Input, Output and Database paths are mandatory.")
             self.append_log("--- ERROR: Missing paths. Pipeline aborted. ---")
@@ -605,7 +735,10 @@ class MainWindow(QMainWindow):
 
         self.set_running_state(False)
         if success:
-            self.status_bar.setFormat("Completed successfully!")
+            if self._run_warning:
+                self.status_bar.setFormat("Completed with errors - check log")
+            else:
+                self.status_bar.setFormat("Completed successfully!")
             self.status_bar.setValue(100)
             if self.open_report_check.isChecked() and html_report_path:
                 self.append_log(f"Opening report: {html_report_path}")
@@ -615,6 +748,14 @@ class MainWindow(QMainWindow):
                     self.append_log(f"Cannot open report automatically: {e}")
             elif self.open_report_check.isChecked():
                 self.append_log("HTML report not generated (check log).")
+            if self._run_warning:
+                QMessageBox.warning(
+                    self, "Completed with errors",
+                    f"{self._run_warning}.\n\n"
+                    "The results cover the other samples only.\n"
+                    "The log reports the cause next to each failed sample."
+                )
+                self._run_warning = None
         else:
             if "Stopping" in self.status_bar.format():
                 self.status_bar.setFormat("Process stopped by user.")
@@ -632,14 +773,18 @@ class MainWindow(QMainWindow):
         for widget in [self.input_dir_btn, self.input_dir_label, self.db_btn,
                        self.db_label, self.output_dir_btn, self.output_dir_label,
                        self.format_combo, self.debug_check,
-                       self.open_report_check, self.filter_check, self.min_len_input,
-                       self.max_len_input, self.min_identity_input, self.min_ref_cov_input,
+                       self.open_report_check, self.length_mode_combo, self.min_len_input,
+                       self.max_len_input, self.scan_lengths_btn,
+                       self.min_identity_input, self.min_ref_cov_input,
                        self.total_threads_input,
                        self.job_threads_input, self.kmer_input, self.window_input,
+                       self.sample_timeout_input,
                        self.force_tax_map_check, self.profile_check,
                        self.delete_bam_check, self.flat_sh_check, self.docker_check,
                        self.docker_check_btn, self.docker_build_btn]:
             widget.setEnabled(not is_running)
+        if not is_running:
+            self._on_length_mode_changed()
 
     def _setup_tray(self, icon):
         self.tray_icon = QSystemTrayIcon(icon, self)
@@ -666,6 +811,7 @@ class MainWindow(QMainWindow):
                                             QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
             if response == QMessageBox.Yes:
                 self.stop_pipeline_signal.emit()
+                self.worker.wait_for_container_stop(15)
                 self.worker_thread.quit()
                 self.worker_thread.wait(5000)
                 event.accept()

@@ -150,7 +150,7 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
 
     if not clean_files:
         print(f"No valid .tmp.txt files found in {results_dir}")
-        return
+        return False
 
     print(f"Starting count aggregation with DuckDB ({len(clean_files)} valid files)...")
 
@@ -260,7 +260,8 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
                 print(f"Empty OTU table saved to: {output_path}")
             except Exception as e:
                 print(f"Error saving empty OTU table: {e}")
-            return
+                return False
+            return True
 
         if has_tax:
             otu_id_dupes = [c for c in final_df.columns
@@ -300,12 +301,15 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
         print(f"CRITICAL ERROR during DuckDB count aggregation: {e}")
         import traceback
         traceback.print_exc()
-        return
+        return False
 
+    tsv_saved = False
+    xlsx_saved = False
     tsv_output = output_path.with_suffix('.tsv')
     print(f"Saving final table (TSV) to {tsv_output}...")
     try:
         final_df.to_csv(tsv_output, sep='\t')
+        tsv_saved = True
         print(f"Final OTU table (TSV) saved to: {tsv_output}")
     except Exception as e:
         print(f"WARNING: Error saving TSV file: {e}")
@@ -313,12 +317,16 @@ def makeOtu_duckdb(results_dir: str, output_file: str, taxonomy_file: str,
     print(f"Saving final table (XLSX) to {output_path}...")
     try:
         final_df.to_excel(output_path, engine='xlsxwriter')
+        xlsx_saved = True
         print(f"Final OTU table (XLSX) saved to: {output_path}")
     except ImportError:
         try:
             final_df.to_excel(output_path, engine='openpyxl')
+            xlsx_saved = True
             print(f"Final OTU table saved to: {output_path} (using openpyxl fallback)")
         except ImportError:
-            print("Neither 'xlsxwriter' nor 'openpyxl' found. XLSX skipped (TSV already saved).")
+            print("Neither 'xlsxwriter' nor 'openpyxl' found. XLSX skipped.")
     except Exception as e:
-        print(f"WARNING: Error saving XLSX file: {e} (TSV already saved)")
+        print(f"WARNING: Error saving XLSX file: {e}")
+
+    return tsv_saved or xlsx_saved

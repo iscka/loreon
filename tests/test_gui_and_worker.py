@@ -1,0 +1,325 @@
+"""Graphical interface defaults and the worker that launches the pipeline."""
+import threading
+import time
+
+import pytest
+
+pytest.importorskip('PyQt5')
+
+from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
+
+import OtuUtils
+import pipeline_gui
+import pipeline_worker
+from helpers import SYSTEM_PATH, make_tool
+
+
+@pytest.fixture(scope='session')
+def app():
+    instance = QApplication.instance() or QApplication([])
+    yield instance
+
+
+@pytest.fixture
+def dialogs(monkeypatch):
+    """Replace modal message boxes, which would wait for a user, with recorders."""
+    shown = []
+    for kind in ('warning', 'critical', 'information'):
+        monkeypatch.setattr(QMessageBox, kind,
+                            lambda *args, _kind=kind, **kwargs: shown.append((_kind, args[2])))
+    monkeypatch.setattr(QMessageBox, 'question', lambda *args, **kwargs: QMessageBox.Yes)
+    return shown
+
+
+@pytest.fixture
+def window(app, dialogs):
+    main_window = pipeline_gui.MainWindow()
+    yield main_window
+    main_window.is_running = False
+    main_window.close()
+    app.processEvents()
+
+
+def base_settings(**overrides):
+    settings = {
+        'input_dir': '/data/in', 'output_dir': '/data/out', 'db_path': '/data/db/ref.fasta',
+        'format': 'unite', 'debug': False, 'enable_filter': False, 'min_len': 0, 'max_len': 0,
+        'total_threads': 2, 'threads_per_job': 1, 'kmer_size': 15, 'window_size': 10,
+        'use_docker': False,
+    }
+    settings.update(overrides)
+    return settings
+
+
+def option_value(arguments, flag):
+    return arguments[arguments.index(flag) + 1]
+
+
+def test_quality_filters_default_to_zero(window):
+    assert window.min_identity_input.value() == 0.0
+    assert window.min_ref_cov_input.value() == 0.0
+
+
+def test_length_filter_is_off_by_default(window):
+    settings = window.collect_settings()
+    assert settings['enable_filter'] is False
+    assert not window.min_len_input.isEnabled()
+    assert not window.max_len_input.isEnabled()
+
+
+def test_length_menu_lists_every_preset(window):
+    combo = window.length_mode_combo
+    entries = [combo.itemData(i) for i in range(combo.count())]
+    assert entries[:2] == [None, 'custom']
+    assert entries[2:] == list(OtuUtils.LENGTH_PRESETS)
+
+
+def test_choosing_a_preset_fills_the_length_window(window):
+    window.length_mode_combo.setCurrentIndex(window.length_mode_combo.findData('its-lsu'))
+    settings = window.collect_settings()
+    assert settings['enable_filter'] is True
+    assert (settings['min_len'], settings['max_len']) == (900, 1800)
+
+
+def test_editing_a_preset_value_switches_to_custom_range(window):
+    window.length_mode_combo.setCurrentIndex(window.length_mode_combo.findData('its-lsu'))
+    window.max_len_input.setValue(2000)
+    assert window.length_mode_combo.currentData() == 'custom'
+    assert window.collect_settings()['max_len'] == 2000
+
+
+def test_sample_time_limit_defaults_to_no_limit(window):
+    assert window.collect_settings()['sample_timeout_min'] == 0
+
+
+def test_worker_disables_quality_filters_when_settings_omit_them(app):
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings()
+    arguments = worker._pipeline_args('in', 'out', 'db.fasta')
+    assert float(option_value(arguments, '--min-percent-identity')) == 0.0
+    assert float(option_value(arguments, '--min-ref-coverage')) == 0.0
+
+
+def test_worker_passes_the_sample_time_limit_only_when_set(app):
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(sample_timeout_min=45)
+    assert option_value(worker._pipeline_args('in', 'out', 'db.fasta'), '--sample-timeout') == '45'
+    worker.settings = base_settings(sample_timeout_min=0)
+    assert '--sample-timeout' not in worker._pipeline_args('in', 'out', 'db.fasta')
+
+
+def test_each_container_gets_its_own_name(app):
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(use_docker=True)
+    first = option_value(worker._docker_base_cmd(), '--name')
+    second = option_value(worker._docker_base_cmd(), '--name')
+    assert first.startswith('loreon-')
+    assert first != second
+
+
+@pytest.mark.fake_tools
+def test_stop_kills_the_running_container(app, tmp_path, monkeypatch):
+    bin_dir = tmp_path / 'bin'
+    log = tmp_path / 'docker.log'
+    make_tool(bin_dir, 'docker', f"""
+        echo "$@" >> "{log}"
+        if [ "$1" = "run" ]; then
+            echo "--- STEP 4: Mapping and Tabeling ---"
+            exec sleep 300
+        fi
+        exit 0
+    """)
+    monkeypatch.setenv('PATH', f"{bin_dir}:{SYSTEM_PATH}")
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(use_docker=True)
+    worker.is_running = True
+    command = worker._build_docker_pipeline_cmd()
+    name = option_value(command, '--name')
+    outcome = {}
+    runner = threading.Thread(target=lambda: outcome.update(result=worker.run_process(command)))
+    runner.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (log.exists() and 'run' in log.read_text()):
+        time.sleep(0.05)
+    started = time.monotonic()
+    worker.stop()
+    assert time.monotonic() - started < 2
+    runner.join(10)
+    assert not runner.is_alive()
+    assert outcome['result'] is False
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and f"kill {name}" not in log.read_text():
+        time.sleep(0.05)
+    assert f"kill {name}" in log.read_text()
+
+
+def run_worker_with_exit_codes(app, monkeypatch, pipeline_code, report_code=0):
+    worker = pipeline_worker.PipelineWorker()
+    monkeypatch.setattr(worker, '_build_native_pipeline_cmd',
+                        lambda: ['bash', '-c', f'echo pipeline output; exit {pipeline_code}'])
+    monkeypatch.setattr(worker, '_build_native_report_cmd',
+                        lambda: ['bash', '-c', f'exit {report_code}'])
+    events = {'finished': [], 'warnings': []}
+    worker.finished_signal.connect(lambda ok, path: events['finished'].append(ok))
+    worker.warning_signal.connect(lambda text: events['warnings'].append(text))
+    worker.run(base_settings())
+    return events
+
+
+@pytest.mark.fake_tools
+def test_worker_reports_partial_failure_and_still_builds_the_report(app, monkeypatch):
+    events = run_worker_with_exit_codes(app, monkeypatch, pipeline_worker.PARTIAL_FAILURE_EXIT_CODE)
+    assert events['finished'] == [True]
+    assert len(events['warnings']) == 1
+
+
+@pytest.mark.fake_tools
+def test_worker_reports_failure_when_the_pipeline_fails(app, monkeypatch):
+    events = run_worker_with_exit_codes(app, monkeypatch, 1)
+    assert events['finished'] == [False]
+    assert events['warnings'] == []
+
+
+def test_window_tells_the_user_when_some_samples_failed(window, dialogs):
+    window.set_running_state(True)
+    window.on_worker_warning('2 of 12 samples failed')
+    window.pipeline_finished(True, None)
+    assert ('warning', '2 of 12 samples failed') in [(kind, text[:22]) for kind, text in dialogs]
+    assert 'error' in window.status_bar.format().lower()
+
+
+def write_reads(folder, length, count=40):
+    folder.mkdir(parents=True)
+    with open(folder / 'reads.fastq', 'w') as handle:
+        for i in range(count):
+            handle.write(f"@r{i}\n{'A' * length}\n+\n{'I' * length}\n")
+
+
+def test_scan_shows_the_lengths_and_applies_the_suggested_window(window, tmp_path, monkeypatch):
+    write_reads(tmp_path / 'barcode01', 1210)
+    write_reads(tmp_path / 'barcode02', 1390)
+    reports = []
+
+    def accept(dialog):
+        reports.append(dialog.report_text)
+        return QDialog.Accepted
+
+    monkeypatch.setattr(pipeline_gui.ReadLengthDialog, 'exec_', accept)
+    window.input_dir_label.setText(str(tmp_path))
+    window.scan_read_lengths()
+    assert 'median' in reports[0]
+    settings = window.collect_settings()
+    assert window.length_mode_combo.currentData() == 'custom'
+    assert (settings['min_len'], settings['max_len']) == (1200, 1400)
+
+
+def test_scan_leaves_the_settings_alone_when_the_dialog_is_closed(window, tmp_path, monkeypatch):
+    write_reads(tmp_path / 'barcode01', 1210)
+    monkeypatch.setattr(pipeline_gui.ReadLengthDialog, 'exec_', lambda dialog: QDialog.Rejected)
+    window.input_dir_label.setText(str(tmp_path))
+    window.scan_read_lengths()
+    assert window.collect_settings()['enable_filter'] is False
+
+
+def test_scan_asks_for_the_input_folder_when_it_is_missing(window, dialogs):
+    window.input_dir_label.setText('')
+    window.scan_read_lengths()
+    assert dialogs and dialogs[0][0] == 'warning'
+
+
+def pump_until(app, condition, seconds=10):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline and not condition():
+        app.processEvents()
+        time.sleep(0.05)
+    app.processEvents()
+    return condition()
+
+
+@pytest.mark.fake_tools
+def test_stop_during_the_report_step_is_not_reported_as_success(app, monkeypatch):
+    worker = pipeline_worker.PipelineWorker()
+    monkeypatch.setattr(worker, '_build_native_pipeline_cmd', lambda: ['bash', '-c', 'exit 0'])
+    monkeypatch.setattr(worker, '_build_native_report_cmd',
+                        lambda: ['bash', '-c', 'echo report started; exec sleep 30'])
+    logs = []
+    finished = []
+    worker.log_signal.connect(logs.append)
+    worker.finished_signal.connect(lambda ok, path: finished.append(ok))
+    runner = threading.Thread(target=worker.run, args=(base_settings(),))
+    runner.start()
+    assert pump_until(app, lambda: 'report started' in logs)
+    worker.stop()
+    assert pump_until(app, lambda: not runner.is_alive())
+    assert pump_until(app, lambda: bool(finished))
+    assert finished == [False]
+
+
+@pytest.mark.fake_tools
+def test_process_started_after_a_stop_request_is_terminated(app, monkeypatch):
+    import subprocess
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings()
+    worker.is_running = True
+    real_popen = subprocess.Popen
+
+    def popen_then_stop(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        worker.is_running = False
+        return process
+
+    monkeypatch.setattr(pipeline_worker.subprocess, 'Popen', popen_then_stop)
+    started = time.monotonic()
+    result = worker.run_process(['bash', '-c', 'echo started; exec sleep 30'])
+    assert result is False
+    assert time.monotonic() - started < 10
+
+
+@pytest.mark.fake_tools
+def test_container_stop_can_be_awaited(app, tmp_path, monkeypatch):
+    bin_dir = tmp_path / 'bin'
+    log = tmp_path / 'docker.log'
+    make_tool(bin_dir, 'docker', f"""
+        if [ "$1" = "run" ]; then
+            echo "run" >> "{log}"
+            echo "--- STEP 4: Mapping and Tabeling ---"
+            exec sleep 300
+        fi
+        if [ "$1" = "kill" ]; then
+            sleep 1
+            echo "killed $2" >> "{log}"
+        fi
+        exit 0
+    """)
+    monkeypatch.setenv('PATH', f"{bin_dir}:{SYSTEM_PATH}")
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(use_docker=True)
+    worker.is_running = True
+    command = worker._build_docker_pipeline_cmd()
+    name = option_value(command, '--name')
+    runner = threading.Thread(target=worker.run_process, args=(command,))
+    runner.start()
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and not (log.exists() and 'run' in log.read_text()):
+        time.sleep(0.05)
+    worker.stop()
+    assert worker.wait_for_container_stop(10) is True
+    assert f"killed {name}" in log.read_text()
+    runner.join(10)
+    assert not runner.is_alive()
+
+
+def test_waiting_for_a_container_stop_returns_at_once_when_nothing_is_pending(app):
+    worker = pipeline_worker.PipelineWorker()
+    started = time.monotonic()
+    assert worker.wait_for_container_stop(10) is True
+    assert time.monotonic() - started < 1
+
+
+def test_closing_the_window_during_a_run_waits_for_the_container_to_stop(window, monkeypatch):
+    waited = []
+    monkeypatch.setattr(window.worker, 'wait_for_container_stop',
+                        lambda timeout=None: waited.append(timeout) or True)
+    window.is_running = True
+    window.close()
+    assert len(waited) == 1

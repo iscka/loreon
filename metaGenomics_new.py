@@ -3,7 +3,9 @@
 import sys
 import os
 import argparse
+import re
 import shutil
+import subprocess
 import multiprocessing
 import json
 import time
@@ -12,8 +14,12 @@ from functools import partial
 import pandas as pd
 try:
     from OtuUtils import (
+        LENGTH_PRESETS,
+        NO_UPPER_LIMIT,
         create_taxonomy_map_from_fasta,
         filter_and_merge_directory,
+        length_filter_advice,
+        length_filter_is_active,
         mapping_improved,
         tabeling_improved,
         _parse_fasta_headers
@@ -24,7 +30,12 @@ except ImportError as e:
     sys.exit(1)
 
 
-def parse_arguments():
+MIN_TOOL_VERSIONS = {'minimap2': (2, 24), 'samtools': (1, 13)}
+PUBLISHED_TOOL_VERSIONS = {'minimap2': '2.28', 'samtools': '1.21'}
+EXIT_PARTIAL_FAILURE = 3
+
+
+def parse_arguments(argv=None):
     parser = argparse.ArgumentParser(description="LOREON Pipeline v1.0")
     io_group = parser.add_argument_group('Input/Output')
     io_group.add_argument(
@@ -48,22 +59,26 @@ def parse_arguments():
     )
     filter_group = parser.add_argument_group('Sequence Filter Parameters')
     filter_group.add_argument(
-        "-min", "--min_len", help="Minimum length.",
-        type=int, default=200
+        "-min", "--min_len",
+        help="Minimum read length in bp. Default: no lower limit, or the "
+             "lower bound of --preset.",
+        type=int, default=None
     )
     filter_group.add_argument(
-        "-max", "--max_len", help="Maximum length.",
-        type=int, default=300
+        "-max", "--max_len",
+        help="Maximum read length in bp (0 = no upper limit). Default: no "
+             "upper limit, or the upper bound of --preset.",
+        type=int, default=None
     )
     filter_group.add_argument(
         "--preset",
-        help="Amplicon preset: sets min/max length to reasonable defaults "
-             "for common markers. Overrides -min/-max if they are at their "
-             "default values. Available: its1, its2, its-full, 16s-v3v4, "
-             "16s-full, 18s-v9, 18s-v4.",
+        help="Amplicon preset: sets the read-length window of a common "
+             "marker. A bound given with -min or -max replaces the "
+             "corresponding bound of the preset. Available: "
+             + ", ".join(f"{name} ({low}-{high})" for name, (low, high) in LENGTH_PRESETS.items())
+             + ". Without -min, -max and --preset no length filter is applied.",
         type=str,
-        choices=['its1', 'its2', 'its-full', '16s-v3v4', '16s-full',
-                 '18s-v9', '18s-v4'],
+        choices=list(LENGTH_PRESETS),
         default=None
     )
     perf_group = parser.add_argument_group('Performance Parameters')
@@ -74,6 +89,19 @@ def parse_arguments():
     perf_group.add_argument(
         "-t", "--threads_per_job", help="Threads per single job.",
         type=int, default=2
+    )
+    perf_group.add_argument(
+        "--sample-timeout",
+        help="Maximum time, in minutes, for mapping and counting one sample "
+             "(0 = no limit, default). A sample that exceeds it is stopped and "
+             "reported as failed.",
+        type=float, default=0.0, metavar="MIN"
+    )
+    perf_group.add_argument(
+        "--progress-interval",
+        help="During mapping, print a progress message whenever this many "
+             "seconds pass without a sample finishing (0 = none). (Default: 60)",
+        type=int, default=60, metavar="SEC"
     )
     map_group = parser.add_argument_group('minimap2 Parameters')
     map_group.add_argument(
@@ -87,17 +115,19 @@ def parse_arguments():
     quality_group = parser.add_argument_group('Alignment Quality Filters')
     quality_group.add_argument(
         "--min-percent-identity",
-        help="Minimum percent identity for an alignment to be kept (0 = disabled). "
-             "E.g. 95 means ≥95%% identity.",
-        type=float, default=95.0, metavar="PCT"
+        help="Minimum percent identity for an alignment to be kept (0 = disabled, "
+             "default). Identity is (L - NM) / L, where L is the read length "
+             "without soft-clipped bases. E.g. 95 means ≥95%% identity.",
+        type=float, default=0.0, metavar="PCT"
     )
     quality_group.add_argument(
         "--min-ref-coverage",
-        help="Minimum query coverage: percentage of the read that must be aligned "
-             "(0 = disabled). E.g. 90 means ≥90%% of the read's length aligned "
-             "(alen/qlen). Note: flag name kept for backward compatibility; the "
-             "previous 'ref coverage' semantics were incorrect for ONT reads.",
-        type=float, default=90.0, metavar="PCT"
+        help="Minimum read coverage: percentage of the read that must be aligned "
+             "(0 = disabled, default). It is L / read length, where L is the read "
+             "length without soft-clipped bases. E.g. 90 means ≥90%% of the read "
+             "aligned. The flag name is kept for backward compatibility: the "
+             "value refers to the read, not to the reference.",
+        type=float, default=0.0, metavar="PCT"
     )
     other_group = parser.add_argument_group('Other')
     other_group.add_argument(
@@ -131,10 +161,50 @@ def parse_arguments():
              "(collapse multiple reference accessions sharing the same SH).",
         action="store_true"
     )
-    return parser.parse_args()
+    return parser.parse_args(argv)
+
+
+def resolve_length_window(min_len, max_len, preset):
+    """Return the (min, max) read-length window to apply.
+
+    A bound given explicitly wins over the preset; a bound that is neither
+    given nor set by a preset is 0, which means no limit on that side.
+    """
+    preset_min, preset_max = LENGTH_PRESETS[preset] if preset else (0, 0)
+    return (
+        preset_min if min_len is None else max(0, min_len),
+        preset_max if max_len is None else max(0, max_len),
+    )
+
+
+def parse_tool_version(text):
+    """Extract (major, minor) from the output of 'minimap2 --version' or 'samtools --version'."""
+    first_line = text.strip().splitlines()[0] if text and text.strip() else ''
+    match = re.search(r'(\d+)\.(\d+)', first_line)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(2))
+
+
+def _tool_version_string(tool):
+    try:
+        result = subprocess.run([tool, '--version'], capture_output=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    output = (result.stdout or result.stderr or b'').decode('utf-8', errors='replace')
+    lines = output.strip().splitlines()
+    version = lines[0].strip() if lines else ''
+    if version.lower().startswith(tool + ' '):
+        version = version[len(tool) + 1:].strip()
+    return version
 
 
 def check_dependencies():
+    """Check that minimap2 and samtools are installed and recent enough.
+
+    Returns the version string of each tool. Stops the run when a tool is
+    missing or older than the oldest version LOREON was tested with.
+    """
     print("Checking dependencies...")
     dependencies = ["minimap2", "samtools"]
     missing_prog = [dep for dep in dependencies if not shutil.which(dep)]
@@ -147,7 +217,33 @@ def check_dependencies():
         print(f"CRITICAL ERROR: Missing Python module: {e.name}")
         print("conda install pandas")
         sys.exit(1)
-    print("Dependencies found.")
+
+    versions = {}
+    outdated = []
+    for tool in dependencies:
+        version = _tool_version_string(tool)
+        versions[tool] = version
+        parsed = parse_tool_version(version)
+        if parsed is None:
+            print(f"WARNING: could not read the version of {tool}; "
+                  f"version {'.'.join(map(str, MIN_TOOL_VERSIONS[tool]))} or newer is required.")
+        elif parsed < MIN_TOOL_VERSIONS[tool]:
+            outdated.append(tool)
+
+    if outdated:
+        for tool in outdated:
+            required = '.'.join(map(str, MIN_TOOL_VERSIONS[tool]))
+            print(f"CRITICAL ERROR: {tool} {versions[tool]} is too old: "
+                  f"LOREON requires {tool} {required} or newer.")
+        print("  The published analyses used minimap2 "
+              f"{PUBLISHED_TOOL_VERSIONS['minimap2']} and samtools {PUBLISHED_TOOL_VERSIONS['samtools']}.")
+        print("  Install them, for example with "
+              f"'conda install -c bioconda minimap2={PUBLISHED_TOOL_VERSIONS['minimap2']} "
+              f"samtools={PUBLISHED_TOOL_VERSIONS['samtools']}', or run LOREON in Docker mode.")
+        sys.exit(1)
+
+    print("Dependencies found: " + ", ".join(f"{tool} {versions[tool]}" for tool in dependencies) + ".")
+    return versions
 
 
 def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
@@ -156,30 +252,38 @@ def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
     min_percent_identity = kwargs.pop('min_percent_identity', 0.0)
     min_ref_coverage = kwargs.pop('min_ref_coverage', 0.0)
     delete_bam = kwargs.pop('delete_bam', False)
+    sample_timeout_s = kwargs.pop('sample_timeout_s', None)
+    started = time.monotonic()
     try:
         if debug:
             print(f"[Worker Map {sample_name}] Starting...")
         sam_file = mapping_improved(
-            fastq_file=str(fastq_file_path), **kwargs
+            fastq_file=str(fastq_file_path), timeout_s=sample_timeout_s, **kwargs
         )
-        if sam_file:
-            mapping_stats = tabeling_improved(
-                samfile=sam_file,
-                threads=kwargs.get('threads', 2),
-                debug=debug,
-                min_percent_identity=min_percent_identity,
-                min_ref_coverage=min_ref_coverage,
-                delete_bam=delete_bam,
-            )
-            if debug:
-                print(f"[Worker Map {sample_name}] Completed.")
-            return (sample_name, "Success", mapping_stats)
-        else:
-            print(f"[Worker Map {sample_name}] ERROR: Mapping failed.")
+        if not sam_file:
+            print(f"[Worker Map {sample_name}] ERROR: Mapping failed.", flush=True)
             return (sample_name, "Failure (Mapping)", None)
-    except Exception as e:
-        print(f"[Worker Map {sample_name}] CRITICAL ERROR: {e}")
-        return (sample_name, f"Failure ({e})", None)
+        remaining_s = None
+        if sample_timeout_s:
+            remaining_s = max(1.0, sample_timeout_s - (time.monotonic() - started))
+        mapping_stats = tabeling_improved(
+            samfile=sam_file,
+            threads=kwargs.get('threads', 2),
+            debug=debug,
+            min_percent_identity=min_percent_identity,
+            min_ref_coverage=min_ref_coverage,
+            delete_bam=delete_bam,
+            timeout_s=remaining_s,
+        )
+        if mapping_stats is None:
+            print(f"[Worker Map {sample_name}] ERROR: Counting the alignments failed.", flush=True)
+            return (sample_name, "Failure (Tabulation)", None)
+        if debug:
+            print(f"[Worker Map {sample_name}] Completed.")
+        return (sample_name, "Success", mapping_stats)
+    except (Exception, SystemExit) as e:
+        print(f"[Worker Map {sample_name}] CRITICAL ERROR: {type(e).__name__}: {e}", flush=True)
+        return (sample_name, f"Failure ({type(e).__name__}: {e})", None)
 
 
 def main():
@@ -195,25 +299,22 @@ def main():
     options = parse_arguments()
     print("--- Metagenomic Pipeline Start (v1.0) ---")
 
-    _PRESETS = {
-        'its1':     (150, 350),
-        'its2':     (150, 400),
-        'its-full': (400, 900),
-        '16s-v3v4': (380, 530),
-        '16s-full': (1200, 1700),
-        '18s-v9':   (100, 220),
-        '18s-v4':   (350, 550),
-    }
+    requested_min, requested_max = options.min_len, options.max_len
+    options.min_len, options.max_len = resolve_length_window(
+        requested_min, requested_max, options.preset
+    )
     if options.preset:
-        p_min, p_max = _PRESETS[options.preset]
-        if options.min_len == 200 and options.max_len == 300:
-            options.min_len, options.max_len = p_min, p_max
-            print(f"[PRESET] Applied '{options.preset}': min_len={p_min}, max_len={p_max}")
-        else:
-            print(f"[PRESET] '{options.preset}' requested but min_len/max_len "
-                  f"already customised — keeping user values.")
+        overridden = [name for name, value in (('-min', requested_min), ('-max', requested_max))
+                      if value is not None]
+        print(f"[PRESET] Applied '{options.preset}': min_len={options.min_len}, "
+              f"max_len={options.max_len}"
+              + (f" ({' and '.join(overridden)} given explicitly)" if overridden else ""))
+    if 0 < options.max_len < options.min_len:
+        print(f"CRITICAL ERROR: the maximum read length ({options.max_len}) is smaller than "
+              f"the minimum ({options.min_len}).")
+        sys.exit(1)
 
-    check_dependencies()
+    tool_versions = check_dependencies()
 
     profiler = None
     if options.profile:
@@ -286,11 +387,14 @@ def main():
 
     if profiler:
         profiler.start_step('Step 2: Filter')
-    print(f"\n--- STEP 2: Sequence Filter (Min: {options.min_len}, Max: {options.max_len}) ---")
+    max_len_text = options.max_len if 0 < options.max_len < NO_UPPER_LIMIT else "no limit"
+    print(f"\n--- STEP 2: Sequence Filter (Min: {options.min_len}, Max: {max_len_text}) ---")
+    if not length_filter_is_active(options.min_len, options.max_len):
+        print("  No read-length filter: reads of any length are used.")
     if options.min_percent_identity > 0:
         print(f"  Alignment quality filter: Min identity = {options.min_percent_identity}%")
     if options.min_ref_coverage > 0:
-        print(f"  Alignment quality filter: Min ref coverage = {options.min_ref_coverage}%")
+        print(f"  Alignment quality filter: Min read coverage = {options.min_ref_coverage}%")
 
     try:
         directories_to_process = [
@@ -325,13 +429,21 @@ def main():
     )
 
     filter_stats_list = []
+    failed_samples = []
     try:
         with multiprocessing.Pool(processes=parallel_jobs) as pool:
             results = pool.map(filter_worker_task, directories_to_process)
-            filter_stats_list = [r for r in results if r is not None]
+            filter_stats_list = [r for r in results if r is not None and not r.get('failed')]
+            failed_samples = [
+                (r['barcode'], f"Failure (Reading the input: {r.get('error', 'unknown error')})")
+                for r in results if r is not None and r.get('failed')
+            ]
     except Exception as e:
         print(f"CRITICAL ERROR during filtering pool: {e}")
         sys.exit(1)
+
+    for sample, status in failed_samples:
+        print(f"ERROR: the reads of '{sample}' could not be read; the sample is left out. {status}")
 
     if profiler:
         total_good = sum(s.get('good_count', 0) for s in filter_stats_list)
@@ -371,6 +483,24 @@ def main():
         except Exception as e:
             print(f"ERROR during filtering report creation: {e}")
 
+    total_reads_in = sum(s.get('total_count', 0) for s in filter_stats_list)
+    total_reads_kept = sum(s.get('good_count', 0) for s in filter_stats_list)
+    sampled_lengths = []
+    sampled_weights = []
+    for s in filter_stats_list:
+        sample = s.get('length_sample') or []
+        if sample:
+            sampled_lengths.extend(sample)
+            sampled_weights.extend([s.get('total_count', 0) / len(sample)] * len(sample))
+    length_advice = length_filter_advice(
+        sampled_lengths, sampled_weights, total_reads_in, total_reads_kept,
+        options.min_len, options.max_len
+    )
+    if length_advice:
+        print()
+        for line in length_advice:
+            print(line)
+
     if profiler:
         profiler.end_step('Step 3: Filter Report')
 
@@ -383,8 +513,26 @@ def main():
         if stats and stats['good_file_out']
     ]
 
+    stale_counts = [f for f in results_dir.glob('*.tmp.txt')]
+    if stale_counts:
+        removed = 0
+        for stale in stale_counts:
+            try:
+                stale.unlink()
+                removed += 1
+            except OSError as e:
+                print(f"CRITICAL ERROR: counts left by an earlier run cannot be removed "
+                      f"({stale.name}: {e}). Use an empty output folder.")
+                sys.exit(1)
+        print(f"Removed {removed} per-sample count files left in the output folder by an earlier run.")
+
     if not fastq_files_to_process:
-        print("ERROR: No 'good' sequences after filtering. Cannot map.")
+        if total_reads_in == 0:
+            print(f"ERROR: No reads found in the subdirectories of {input_dir}. Cannot map.")
+        else:
+            print(f"ERROR: No reads left after the read-length filter "
+                  f"(Min: {options.min_len}, Max: {max_len_text}). Cannot map.")
+            print("  Change the length window as suggested above and run again.")
         sys.exit(1)
 
     print(f"{len(fastq_files_to_process)} 'good' files (merged) ready for mapping.")
@@ -409,6 +557,7 @@ def main():
         'min_percent_identity': options.min_percent_identity,
         'min_ref_coverage': options.min_ref_coverage,
         'delete_bam': options.delete_bam,
+        'sample_timeout_s': options.sample_timeout * 60 if options.sample_timeout > 0 else None,
     }
 
     map_worker_task = partial(
@@ -416,11 +565,44 @@ def main():
         **map_worker_kwargs
     )
 
+    if options.sample_timeout > 0:
+        print(f"Time limit per sample: {options.sample_timeout:g} min.")
+
+    samples_to_map = len(fastq_files_to_process)
+    total_samples = samples_to_map + len(failed_samples)
+    progress_interval = options.progress_interval if options.progress_interval > 0 else None
+    step_started = time.monotonic()
+    last_progress = step_started
     try:
         with multiprocessing.Pool(processes=parallel_jobs_map) as pool:
             results = []
-            for result_tuple in pool.imap_unordered(map_worker_task, fastq_files_to_process):
+            worker_pids = {process.pid for process in multiprocessing.active_children()}
+            pending = pool.imap_unordered(map_worker_task, fastq_files_to_process)
+            while len(results) < samples_to_map:
+                try:
+                    result_tuple = pending.next(timeout=1.0)
+                except multiprocessing.TimeoutError:
+                    alive_pids = {process.pid for process in multiprocessing.active_children()}
+                    if not worker_pids <= alive_pids:
+                        completed_names = {r[0] for r in results}
+                        print("ERROR: a worker process ended unexpectedly; the computer or the "
+                              "Docker container may have run out of memory.", flush=True)
+                        for fastq in fastq_files_to_process:
+                            if fastq.name not in completed_names:
+                                results.append((fastq.name,
+                                                "Failure (a worker process ended unexpectedly)", None))
+                                print(f"  - {fastq.name}: not completed", flush=True)
+                        break
+                    now = time.monotonic()
+                    if progress_interval and now - last_progress >= progress_interval:
+                        last_progress = now
+                        elapsed = int(now - step_started)
+                        print(f"  Step 4 progress: {len(results)}/{samples_to_map} samples completed "
+                              f"(elapsed {elapsed // 3600:02d}:{elapsed % 3600 // 60:02d}:{elapsed % 60:02d})",
+                              flush=True)
+                    continue
                 results.append(result_tuple)
+                last_progress = time.monotonic()
                 sample, status = result_tuple[0], result_tuple[1]
                 print(f"  - {sample}: {status}", flush=True)
 
@@ -434,9 +616,23 @@ def main():
                 success_count += 1
                 if stats:
                     mapping_stats_list.append(stats)
+            else:
+                failed_samples.append((sample, status))
         print(f"Completed successfully: {success_count} / {len(results)}")
     except Exception as e:
         print(f"CRITICAL ERROR during mapping pool: {e}")
+        sys.exit(1)
+
+    if failed_samples:
+        print("\n" + "=" * 70)
+        print(f"  ERROR: {len(failed_samples)} of {total_samples} samples failed "
+              f"and are missing from the results:")
+        for sample, status in failed_samples:
+            print(f"    - {sample}: {status}")
+        print("  The cause of each failure is reported above, next to the sample name.")
+        print("=" * 70 + "\n")
+    if success_count == 0:
+        print("ERROR: mapping failed for every sample: no result can be produced.")
         sys.exit(1)
 
     if mapping_stats_list:
@@ -462,6 +658,7 @@ def main():
                 'min_percent_identity': options.min_percent_identity,
                 'min_ref_coverage': options.min_ref_coverage,
             },
+            'tools': tool_versions,
             'summary': {
                 'total_reads_all': total_reads_all,
                 'total_mapped_all': total_mapped_all,
@@ -489,8 +686,9 @@ def main():
         profiler.start_step('Step 5: OTU Aggregation')
     print("\n--- STEP 5: Results Aggregation ---")
 
+    table_written = False
     try:
-        makeOtu_duckdb(
+        table_written = makeOtu_duckdb(
             results_dir=str(results_dir),
             output_file=str(final_output_file),
             taxonomy_file=str(generated_tax_map_path),
@@ -505,6 +703,16 @@ def main():
         profiler.save(output_dir, db_name=db_name,
                       total_threads=options.total_threads,
                       threads_per_job=options.threads_per_job)
+
+    if not table_written:
+        print("\nERROR: the OTU table could not be written. See the messages above.")
+        sys.exit(1)
+
+    if failed_samples:
+        print(f"\n--- Pipeline Complete with errors: {len(failed_samples)} of "
+              f"{total_samples} samples failed ---")
+        print(f"OTU table saved to: {final_output_file.name}")
+        sys.exit(EXIT_PARTIAL_FAILURE)
 
     print(f"\n--- Pipeline Complete ---")
     print(f"OTU table saved to: {final_output_file.name}")

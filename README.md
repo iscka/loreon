@@ -2,7 +2,7 @@
 
 LOREON is a cross-platform bioinformatics application for processing **Oxford Nanopore Technologies (ONT)** long-read amplicon metagenomic data. It was originally designed for **fungal ITS** barcoding and now also supports **bacterial 16S**, and eukaryotic **18S (SSU)** / **LSU** markers.
 
-The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folders), filters them by length, maps them against a reference database with **minimap2**, applies alignment-quality filters with **samtools**, aggregates the results into an **OTU table** with **DuckDB**, and produces a self-explanatory **interactive HTML report**. Everything is driven either from a **PyQt5 graphical interface** or from the **command line**, and can run natively on Linux/macOS or inside a **Docker container** on Windows.
+The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folders), optionally filters them by length, maps them against a reference database with **minimap2**, counts the primary alignments per reference (optionally filtered by identity and read coverage), aggregates the results into an **OTU table** with **DuckDB**, and produces a self-explanatory **interactive HTML report**. Everything is driven either from a **PyQt5 graphical interface** or from the **command line**, and can run natively on Linux/macOS or inside a **Docker container** on Windows.
 
 ---
 
@@ -35,16 +35,17 @@ The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folder
 
 ## Key Features
 
-- **Length filtering** — configurable minimum/maximum read length, with ready-made presets for common amplicon markers (ITS1, ITS2, full ITS, 16S V3–V4, full 16S, 18S V4/V9).
+- **Length filtering** — configurable minimum/maximum read length, with ready-made presets for common amplicon markers (ITS1, ITS2, full ITS, ITS–LSU, rRNA operon, 16S V3–V4, full 16S, 18S V4/V9). No window is applied unless one is chosen; the run reports the observed read lengths and warns when a window discards most of the reads.
 - **High-throughput mapping** — minimap2 with the `map-ont` preset, piped directly into `samtools sort` to avoid intermediate SAM files on disk.
-- **Alignment-quality filtering** — post-mapping filters on **percent identity** and **read (query) coverage**, applied directly through `samtools view -e` expressions, plus flag-based removal of unmapped/secondary/supplementary alignments.
+- **Alignment-quality filtering** — optional post-mapping filters on **percent identity** and **read (query) coverage**, computed by LOREON from the CIGAR string and the `NM` tag of each alignment (independent of the samtools version), plus removal of unmapped/secondary/supplementary alignments. Both filters are disabled by default.
 - **Parallel execution** — a two-level threading model parallelises both the filtering stage (per barcode) and the mapping stage (multiple concurrent minimap2 jobs).
 - **OTU aggregation with DuckDB** — per-sample count tables are pivoted, joined with taxonomy and written to a single Excel/TSV OTU table using an out-of-core analytical engine.
 - **Interactive HTML report** — a single self-describing HTML file with Plotly charts: mapping QC, length-filter QC, taxonomic composition (Family/Genus/Species), a top-OTU heatmap and a searchable OTU table.
 - **Multiple database formats** — UNITE, SILVA, CBS (Westerdijk), Eukariome, and a raw "none" mode.
 - **Taxonomy caching** — the parsed taxonomy map is written once per database and reused on subsequent runs.
 - **Cross-platform GUI** — PyQt5 interface with splash screen, system-tray icon, live execution log, progress bar, hardware-aware thread hints and an embedded license/credits viewer.
-- **Windows Docker mode** — the GUI runs natively on the host while minimap2, samtools and the pipeline execute inside a reproducible Ubuntu container.
+- **Windows Docker mode** — the GUI runs natively on the host while minimap2, samtools and the pipeline execute inside a reproducible Ubuntu container with pinned tool versions (minimap2 2.28, samtools 1.21).
+- **Explicit failures** — the exit status of every external tool is checked; a failing sample is reported with the last lines of the tool's error output, progress is printed periodically during mapping, and an optional time limit per sample stops a stuck job.
 - **Performance profiling** — optional per-step metrics (wall time, CPU time, memory, throughput) exported to JSON and to a formatted Word document.
 - **Disk-space controls** — optional deletion of intermediate BAM/SAM files and gzip compression of merged FASTQ intermediates.
 
@@ -55,9 +56,9 @@ The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folder
 | Step | Name | What happens |
 |------|------|--------------|
 | **0** | Taxonomy parsing | Reference FASTA headers are parsed into a taxonomy map (`<db>_taxonomy_map.tsv`). The map is cached and reused unless `--force-tax-map` is set. |
-| **1** | Sequence filtering | Every `barcodeXX` / `unclassified` folder is scanned; reads outside the `[min_len, max_len]` window are discarded. Kept reads are merged per barcode into a single FASTQ (optionally gzipped). |
+| **1** | Sequence filtering | Every `barcodeXX` / `unclassified` folder is scanned; reads outside the `[min_len, max_len]` window, when one is set, are discarded. Kept reads are merged per barcode into a single FASTQ (optionally gzipped). |
 | **1.5** | Filter report | Per-barcode statistics (good/bad counts, mean & median length) are written to an Excel report. |
-| **2** | Mapping & tabeling | Each merged FASTQ is mapped with minimap2 (`map-ont`), piped into `samtools sort`. Pre-filter mapping statistics are collected with `samtools flagstat`; alignment-quality filters are applied with `samtools view -e`; post-filter statistics and a per-sample count table are produced. All figures are stored in `mapping_stats.json`. |
+| **2** | Mapping & tabeling | Each merged FASTQ is mapped with minimap2 (`map-ont`), piped into `samtools sort`. The sorted BAM is then read once: primary alignments are counted per reference and, if requested, filtered by identity and read coverage. Pre- and post-filter statistics and a per-sample count table are produced; the alignments that pass are written to a filtered BAM. All figures, with the tool versions, are stored in `mapping_stats.json`. |
 | **3** | Results aggregation | DuckDB pivots and joins all per-sample count tables with taxonomy into one OTU table, with barcodes sorted naturally (`barcode01 … barcode10 … unclassified`). Reference-ID reformatting per database format happens in-query. |
 | **4** | HTML report | An interactive Plotly HTML report is generated from the OTU table, the filter report and `mapping_stats.json`. |
 
@@ -69,8 +70,10 @@ The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folder
 
 Must be installed and available on `PATH`:
 
-- [minimap2](https://github.com/lh3/minimap2) ≥ 2.17
-- [samtools](http://www.htslib.org/) **≥ 1.13** (required for the `samtools view -e` expression filter)
+- [minimap2](https://github.com/lh3/minimap2) **≥ 2.24**
+- [samtools](http://www.htslib.org/) **≥ 1.13**
+
+These are the oldest versions LOREON was tested with; the analyses of the article used minimap2 2.28 and samtools 1.21, which are also the versions built into the Docker image. The versions found on `PATH` are printed at start-up and recorded in `mapping_stats.json`; a run with an older version stops with an explicit message.
 - `awk` / `gawk` (pre-installed on most Unix systems)
 
 ### Windows
@@ -102,7 +105,7 @@ Installed via `pip install -r requirements.txt`:
 ```bash
 conda create -n loreon python=3.9
 conda activate loreon
-conda install -c bioconda "minimap2>=2.17" "samtools>=1.13"
+conda install -c bioconda minimap2=2.28 samtools=1.21
 pip install -r requirements.txt
 ```
 
@@ -154,10 +157,10 @@ Launch with `python pipeline_gui.py`. The window is organised into numbered grou
    - **Enable Performance Profiling** — writes the profiling report.
    - **Delete BAM/SAM after analysis** — frees disk space.
    - **Flat SH (UNITE only)** — collapses reference accessions sharing the same UNITE Species Hypothesis.
-   - **Read & Alignment Filter** group — enable length filtering (min/max bp), set **Min Identity (%)** and **Min Read Coverage (%)**.
-3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs.
+   - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default.
+3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs, and optionally a maximum time per sample.
 4. **Docker (required on Windows)** — enable Docker mode, **Check Image** and **Build Image** (first run only).
-5. **START PIPELINE / STOP** — run or gracefully terminate the pipeline.
+5. **START PIPELINE / STOP** — run or terminate the pipeline. In Docker mode **STOP** also stops the container.
 6. **Execution Log** — real-time streaming log with a progress bar.
 
 Additional conveniences: a **splash screen** on launch, a **system-tray icon** with show/quit actions, and an embedded **License & Credits** viewer.
@@ -188,18 +191,22 @@ Additional conveniences: a **splash screen** on launch, a **system-tray icon** w
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `-min, --min_len` | 200 | Minimum read length (bp). |
-| `-max, --max_len` | 300 | Maximum read length (bp). |
-| `--preset` | — | Amplicon preset that sets sensible min/max lengths (see [presets](#amplicon-presets)). Applied only if min/max are still at their defaults. |
+| `-min, --min_len` | no limit | Minimum read length (bp). |
+| `-max, --max_len` | no limit | Maximum read length (bp); `0` means no upper limit. |
+| `--preset` | — | Amplicon preset that sets the length window of a common marker (see [presets](#amplicon-presets)). A bound given with `-min` or `-max` replaces the corresponding bound of the preset. |
+
+Without `-min`, `-max` and `--preset` no length filter is applied. After the filtering step the run prints the observed read lengths (median and the range holding 90 % of the reads). If a window discards more than half of the reads, a warning suggests a window and the presets that would keep them.
 
 ### Alignment-quality filters
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--min-percent-identity PCT` | 95.0 | Minimum alignment percent identity, applied as `(alen − NM) × 100 ≥ PCT × alen`. Set `0` to disable. |
-| `--min-ref-coverage PCT` | 90.0 | Minimum **read (query) coverage**: percentage of the read that must align, `alen / qlen × 100 ≥ PCT`. Set `0` to disable. *(The flag name is retained for backward compatibility; the semantics are query coverage, which is the correct measure for ONT reads.)* |
+| `--min-percent-identity PCT` | 0 (disabled) | Minimum alignment percent identity, `(L − NM) / L × 100 ≥ PCT`. |
+| `--min-ref-coverage PCT` | 0 (disabled) | Minimum **read (query) coverage**: percentage of the read that must align, `L / read length × 100 ≥ PCT`. *(The flag name is retained for backward compatibility; the value refers to the read, not to the reference.)* |
 
-In addition, a flag filter `-F 0x904` always removes unmapped, secondary and supplementary alignments.
+`L` is the read length without soft-clipped bases and `NM` is the edit distance reported by minimap2. Both values are computed by LOREON while it counts the alignments, so the result is the same with every supported samtools version. Unmapped, secondary and supplementary alignments are always left out.
+
+Reads that are longer than the reference sequences (for example ITS–LSU amplicons mapped on an ITS-only database) align over a fraction of their length only: a read-coverage threshold then removes most of them. The published analyses were run with both filters disabled.
 
 ### Performance
 
@@ -207,6 +214,8 @@ In addition, a flag filter `-F 0x904` always removes unmapped, secondary and sup
 |------|---------|-------------|
 | `-T, --total_threads` | 8 | Total CPU threads. |
 | `-t, --threads_per_job` | 2 | Threads per single mapping job (parallel jobs ≈ `T / t`). |
+| `--sample-timeout MIN` | 0 (no limit) | Maximum time, in minutes, for mapping and counting one sample. A sample that exceeds it is stopped and reported as failed. |
+| `--progress-interval SEC` | 60 | A progress message is printed during mapping whenever this many seconds pass without a sample finishing (`0` = none). |
 
 ### minimap2
 
@@ -224,21 +233,33 @@ In addition, a flag filter `-F 0x904` always removes unmapped, secondary and sup
 | `--delete-bam` | Delete BAM/SAM files after tabeling to save disk space. |
 | `--gzip-intermediate` | Write merged FASTQ intermediates as `.fastq.gz` (minimap2 reads gzip natively). |
 
+### Exit status
+
+| Code | Meaning |
+|------|---------|
+| `0` | All samples were processed. |
+| `1` | The run stopped: invalid input, missing or outdated tool, no reads left after the length filter, every sample failed, or the OTU table could not be written. |
+| `3` | The OTU table was written, but one or more samples failed (unreadable input, mapping or counting error, time limit) and are missing from it. The failed samples and the cause of each failure are listed in the log. |
+
 ---
 
 ## Amplicon Presets
 
-`--preset` sets the length window to reasonable defaults for common markers (only when `-min`/`-max` are left at their defaults):
+`--preset` (or the **Length filter** menu of the GUI) sets the length window of a common marker. A bound given with `-min` or `-max` replaces the corresponding bound of the preset.
 
 | Preset | min–max (bp) | Marker |
 |--------|--------------|--------|
 | `its1` | 150–350 | Fungal ITS1 |
 | `its2` | 150–400 | Fungal ITS2 |
 | `its-full` | 400–900 | Full-length ITS |
+| `its-lsu` | 900–1800 | ITS plus the 5′ end of the LSU (e.g. ITS1–NL4 amplicons) |
+| `rrna-operon` | 3000–6500 | rRNA operon, SSU to LSU (e.g. NS1–RCA95m amplicons) |
 | `16s-v3v4` | 380–530 | Bacterial 16S V3–V4 |
 | `16s-full` | 1200–1700 | Full-length 16S |
 | `18s-v9` | 100–220 | Eukaryotic 18S V9 |
 | `18s-v4` | 350–550 | Eukaryotic 18S V4 |
+
+The windows are indicative: check them against the read lengths of your own run, which are printed after the filtering step and shown by **Scan read lengths...** in the GUI.
 
 ---
 
@@ -274,7 +295,7 @@ input_data/
 ```
 output_folder/
 ├── mapping/                          # minimap2 / sorted BAM intermediates
-├── tabeling/
+├── tabeling/                         # filtered BAM (alignments that were counted) and index, per sample
 │   └── results/                      # per-sample count tables (*.tmp.txt)
 ├── good_seq/                         # reads kept by the length filter (merged per barcode)
 ├── bad_seq/                          # reads discarded by the length filter
@@ -286,6 +307,8 @@ output_folder/
 ├── profile_report.json               # profiling data (with --profile)
 └── profile_report.docx               # profiling Word report (with --profile)
 ```
+
+An output folder can be reused: the per-sample count tables left by an earlier run are removed before mapping, so the OTU table always describes the current run only.
 
 ---
 
@@ -354,14 +377,16 @@ Metrics collected per step include `wall_time_s`, `cpu_time_s`, `mem_mb`, plus s
 
 ## Windows / Docker Mode
 
-On Windows, LOREON runs in mixed mode: the GUI is native, while minimap2, samtools and the pipeline run inside a Docker container built from the included `Dockerfile` (Ubuntu 22.04 + minimap2 + samtools + gawk + the Python pipeline).
+On Windows, LOREON runs in mixed mode: the GUI is native, while minimap2, samtools and the pipeline run inside a Docker container built from the included `Dockerfile` (Ubuntu 22.04 with minimap2 2.28 and samtools 1.21 compiled from the official source releases, whose checksums are verified during the build, plus the Python pipeline). The first build downloads and compiles the two tools and takes a few minutes.
 
 1. Install Docker Desktop (WSL 2 backend) and Python ≥ 3.8.
 2. Launch the GUI (`python pipeline_gui.py` or the installed executable).
 3. In group **3. Docker**, tick **Use Docker** and click **Build Image** (first run only) — this builds the `loreon:latest` image.
 4. Select the input folder, database FASTA and output folder, then click **START PIPELINE**.
 
-Under the hood the host folders are bind-mounted into the container as `/data/input` (read-only), `/data/output` and `/data/db`.
+Under the hood the host folders are bind-mounted into the container as `/data/input` (read-only), `/data/output` and `/data/db`. Each run uses a container with its own name (`loreon-<id>`); **STOP** kills that container.
+
+Mapping needs memory in proportion to the reference database. If a tool is reported as *killed*, raise the memory assigned to Docker (Docker Desktop → Settings → Resources) or lower the number of parallel jobs.
 
 The helper script `run_loreon.sh` runs the containerised pipeline directly from a shell, creating `~/Documents/loreon/{data,results,db}` and mounting them automatically.
 
@@ -401,10 +426,13 @@ sample_barcode02.fastq.gz   →   sample_barcode02/sample_barcode02.fastq.gz
 | Symptom | Fix |
 |---------|-----|
 | **`minimap2` not found** | Install it (`conda install -c bioconda minimap2`) or use Docker mode. |
-| **`samtools view: expression filter not supported`** | The `-e` filter needs samtools ≥ 1.13; upgrade, or disable filters with `--min-percent-identity 0 --min-ref-coverage 0`. |
+| **`minimap2`/`samtools` is too old** | LOREON needs minimap2 ≥ 2.24 and samtools ≥ 1.13: `conda install -c bioconda minimap2=2.28 samtools=1.21`, or use Docker mode. |
 | **Cannot create taxonomy map** | Check that `-f` matches the database format; ensure write permission; retry with `--force-tax-map`. |
-| **No "good" reads after filtering** | Adjust `-min`/`-max` (or a `--preset`) to your amplicon; check FASTQ files with `--debug`. |
-| **Zero reads after quality filter** | The default 95% identity / 90% coverage thresholds are strict; lower them (e.g. `--min-percent-identity 85 --min-ref-coverage 70`) or set to `0`. The Mapping QC section shows per-sample retention. |
+| **No reads left after the length filter** | The log reports the observed read lengths and suggests a window and the matching presets; set `-min`/`-max` or `--preset` accordingly (GUI: **Scan read lengths...**). |
+| **Zero reads after quality filter** | The identity and read-coverage filters are disabled by default; if you enabled them, lower the thresholds or set them to `0`. Read coverage is low by construction when the reads are longer than the reference sequences. The Mapping QC section shows per-sample retention. |
+| **Step 4 seems stuck** | A progress line (`Step 4 progress: n/N samples completed`) is printed whenever 60 s pass without a sample finishing, so a silent log is not expected. Use `--sample-timeout` (GUI: *Max min/sample*) to stop a sample that exceeds a time limit. |
+| **A tool "was terminated by signal 9"**, or **"a worker process ended unexpectedly"** | The computer or the Docker container ran out of memory: assign more memory to Docker or use fewer parallel jobs (`-T`/`-t`). |
+| **"n of N samples failed"** | The other samples are in the OTU table (exit status `3`); the log shows the failing tool, its exit status and the last lines of its error output next to each failed sample. |
 | **Missing Python module** | `pip install -r requirements.txt`. |
 | **GUI crashes on macOS** | `pip install PyQt5`; you may also need `brew install python-tk`. |
 
@@ -429,6 +457,16 @@ Enable `--debug` for exact commands, processed paths and detailed per-step outpu
 | `Dockerfile` | Container image for the containerised pipeline. |
 | `template.html` | Jinja2 template for the HTML report. |
 | `requirements.txt` | Python dependencies. |
+| `tests/` | Automated tests (`pytest`). |
+
+### Running the tests
+
+```bash
+pip install pytest
+pytest tests
+```
+
+The tests build a small synthetic dataset on the fly. Those that need minimap2 and samtools are skipped when the tools are not installed; the others replace the tools with stand-ins to check how failures are reported.
 
 ---
 

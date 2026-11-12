@@ -1,7 +1,11 @@
 import statistics
 import random
 import re
+import signal
 import subprocess
+import tempfile
+import threading
+import time
 from pathlib import Path
 import sys
 import multiprocessing
@@ -61,6 +65,245 @@ def _reservoir_add(reservoir, n, value):
     return n
 
 
+LENGTH_PRESETS = {
+    'its1': (150, 350),
+    'its2': (150, 400),
+    'its-full': (400, 900),
+    'its-lsu': (900, 1800),
+    'rrna-operon': (3000, 6500),
+    '16s-v3v4': (380, 530),
+    '16s-full': (1200, 1700),
+    '18s-v9': (100, 220),
+    '18s-v4': (350, 550),
+}
+
+LENGTH_PRESET_LABELS = {
+    'its1': 'Fungal ITS1',
+    'its2': 'Fungal ITS2',
+    'its-full': 'Full-length ITS',
+    'its-lsu': 'ITS-LSU',
+    'rrna-operon': 'rRNA operon',
+    '16s-v3v4': 'Bacterial 16S V3-V4',
+    '16s-full': 'Full-length 16S',
+    '18s-v9': 'Eukaryotic 18S V9',
+    '18s-v4': 'Eukaryotic 18S V4',
+}
+
+NO_UPPER_LIMIT = 999_999
+_LENGTH_SAMPLE_SIZE = 500
+_HISTOGRAM_BIN_WIDTHS = (10, 20, 25, 50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000)
+
+
+def length_filter_is_active(min_len, max_len):
+    """True when the length window excludes reads of some length."""
+    return min_len > 0 or 0 < max_len < NO_UPPER_LIMIT
+
+
+def _weighted_lengths(lengths, weights=None):
+    if weights is None:
+        pairs = sorted((int(length), 1.0) for length in lengths)
+    else:
+        pairs = sorted((int(length), float(weight)) for length, weight in zip(lengths, weights))
+    return pairs, sum(weight for _, weight in pairs)
+
+
+def _quantile(pairs, total, fraction):
+    target = fraction * total
+    cumulative = 0.0
+    for length, weight in pairs:
+        cumulative += weight
+        if cumulative >= target:
+            return length
+    return pairs[-1][0]
+
+
+def _share_within(pairs, total, low, high):
+    inside = sum(weight for length, weight in pairs if low <= length <= high)
+    return inside / total * 100 if total > 0 else 0.0
+
+
+def summarize_lengths(lengths, weights=None):
+    """Summarise read lengths: count, minimum, 5th percentile, median, 95th percentile, maximum.
+
+    weights gives the number of reads each sampled length stands for.
+    Returns None when no length is given.
+    """
+    pairs, total = _weighted_lengths(lengths, weights)
+    if not pairs or total <= 0:
+        return None
+    return {
+        'count': int(round(total)),
+        'min': pairs[0][0],
+        'p05': _quantile(pairs, total, 0.05),
+        'median': _quantile(pairs, total, 0.5),
+        'p95': _quantile(pairs, total, 0.95),
+        'max': pairs[-1][0],
+    }
+
+
+def suggest_length_window(summary):
+    """Window, rounded outwards to 50 bp, that holds the central 90 % of the reads."""
+    low = (summary['p05'] // 50) * 50
+    high = -(-summary['p95'] // 50) * 50
+    return low, high
+
+
+def preset_shares(lengths, weights=None):
+    """Percentage of reads whose length falls inside each preset window."""
+    pairs, total = _weighted_lengths(lengths, weights)
+    return {name: _share_within(pairs, total, low, high)
+            for name, (low, high) in LENGTH_PRESETS.items()}
+
+
+def _describe_window(min_len, max_len):
+    if 0 < max_len < NO_UPPER_LIMIT:
+        return f"{min_len}-{max_len} bp"
+    return f"{min_len} bp or longer"
+
+
+def length_filter_advice(lengths, weights, total, kept, min_len, max_len):
+    """Lines to print about the outcome of the read-length filter.
+
+    lengths (with optional weights) is a sample of the read lengths before
+    filtering; total and kept are the read counts before and after it.
+    A warning is returned when the filter discards more than half of the
+    reads, a note when no filter is active, and nothing otherwise.
+    """
+    summary = summarize_lengths(lengths, weights) if lengths else None
+    if total <= 0 or summary is None:
+        return []
+    observed = (f"  Observed read lengths: median {summary['median']} bp; "
+                f"90 % of the reads between {summary['p05']} and {summary['p95']} bp.")
+    if not length_filter_is_active(min_len, max_len):
+        return [
+            f"NOTE: no read-length filter is active: all {total} reads are used.",
+            observed,
+            "  If off-target products of a different length are present, restrict the analysis",
+            "  to the expected amplicon length (-min/-max, --preset, or the length menu of the GUI).",
+        ]
+    discarded = total - kept
+    if discarded * 2 <= total:
+        return []
+    low, high = suggest_length_window(summary)
+    lines = [
+        f"WARNING: the read-length filter ({_describe_window(min_len, max_len)}) discarded "
+        f"{discarded} of {total} reads ({discarded / total * 100:.1f} %).",
+        observed,
+        "  If the window does not match your amplicon, change it:",
+        f"    a window of {low}-{high} bp would keep the central 90 % of the reads;",
+    ]
+    shares = preset_shares(lengths, weights)
+    matching = [name for name in LENGTH_PRESETS if shares[name] >= 50.0]
+    matching.sort(key=lambda name: -shares[name])
+    for name in matching[:3]:
+        preset_low, preset_high = LENGTH_PRESETS[name]
+        lines.append(f"    preset '{name}' ({preset_low}-{preset_high} bp) would keep "
+                     f"{shares[name]:.1f} % of the reads.")
+    lines.append(f"  If the window is right, most reads of this run are products of a different "
+                 f"length and the analysis uses the remaining {kept} reads.")
+    return lines
+
+
+def format_length_report(lengths, weights=None):
+    """Text report of a read-length distribution: summary, histogram and share per preset."""
+    summary = summarize_lengths(lengths, weights)
+    if summary is None:
+        return "No reads found."
+    pairs, total = _weighted_lengths(lengths, weights)
+    low, high = suggest_length_window(summary)
+    lines = [
+        f"Reads examined: {summary['count']}",
+        "",
+        "Read length (bp):",
+        f"  minimum          {summary['min']:>7}",
+        f"  5th percentile   {summary['p05']:>7}",
+        f"  median           {summary['median']:>7}",
+        f"  95th percentile  {summary['p95']:>7}",
+        f"  maximum          {summary['max']:>7}",
+        f"Window holding the central 90 % of the reads: {low}-{high} bp",
+        "",
+        "Length distribution:",
+    ]
+    first = _quantile(pairs, total, 0.005)
+    last = _quantile(pairs, total, 0.995)
+    width = next((w for w in _HISTOGRAM_BIN_WIDTHS if w * 24 >= last - first + 1), _HISTOGRAM_BIN_WIDTHS[-1])
+    start = (first // width) * width
+    stop = (last // width + 1) * width
+    bins = {}
+    below = above = 0.0
+    for length, weight in pairs:
+        if length < start:
+            below += weight
+        elif length >= stop:
+            above += weight
+        else:
+            index = (length - start) // width
+            bins[index] = bins.get(index, 0.0) + weight
+    peak = max(list(bins.values()) + [below, above, 1e-9])
+
+    def _row(label, weight):
+        bar = '#' * max(1, int(round(weight / peak * 30))) if weight > 0 else ''
+        return f"  {label:>13} | {bar} {weight / total * 100:.1f} %"
+
+    if below > 0:
+        lines.append(_row(f"< {start}", below))
+    gap = False
+    for index in range((stop - start) // width):
+        weight = bins.get(index, 0.0)
+        if weight <= 0:
+            if not gap:
+                lines.append(f"  {'...':>13} |")
+                gap = True
+            continue
+        gap = False
+        lines.append(_row(f"{start + index * width}-{start + (index + 1) * width - 1}", weight))
+    if above > 0:
+        lines.append(_row(f">= {stop}", above))
+    lines.append("")
+    lines.append("Share of the reads inside each preset window:")
+    for name, (preset_low, preset_high) in LENGTH_PRESETS.items():
+        share = _share_within(pairs, total, preset_low, preset_high)
+        lines.append(f"  {name:<12} {preset_low:>5}-{preset_high:<5} bp  {share:5.1f} %")
+    return '\n'.join(lines)
+
+
+def sample_read_lengths(input_dir, reads_per_file=1000, max_files=200):
+    """Lengths of the first reads of the FASTQ files below a folder.
+
+    At most max_files files, evenly spread over the sorted file list, are
+    opened and at most reads_per_file reads are taken from each.
+    """
+    input_dir = Path(input_dir)
+    files = sorted(
+        f for pattern in ('**/*.f*q.gz', '**/*.f*q') for f in input_dir.glob(pattern)
+        if not f.name.startswith('._')
+    )
+    if len(files) > max_files:
+        step = len(files) / max_files
+        files = [files[int(i * step)] for i in range(max_files)]
+    lengths = []
+    for file_path in files:
+        opener = gzip.open if file_path.name.endswith('.gz') else open
+        try:
+            with opener(file_path, 'rt', encoding='utf-8', errors='replace') as handle:
+                for count, record in enumerate(_iter_fastq_raw(handle)):
+                    if count >= reads_per_file:
+                        break
+                    lengths.append(record[4])
+        except (OSError, EOFError):
+            continue
+    return lengths
+
+
+def _thin_length_sample(reservoir):
+    """Evenly spaced order statistics of a length sample, at most _LENGTH_SAMPLE_SIZE values."""
+    ordered = sorted(reservoir)
+    if len(ordered) <= _LENGTH_SAMPLE_SIZE:
+        return ordered
+    step = (len(ordered) - 1) / (_LENGTH_SAMPLE_SIZE - 1)
+    return [ordered[int(round(i * step))] for i in range(_LENGTH_SAMPLE_SIZE)]
+
+
 def filter_and_merge_directory(
     input_dir: Path,
     min_len: int,
@@ -99,12 +342,13 @@ def filter_and_merge_directory(
         bad_file_path = bad_dir / base_name
 
     except Exception as e:
-        print(f"Error setting up paths for '{dir_name}': {e}")
-        return None
+        print(f"Error setting up paths for '{dir_name}': {e}", flush=True)
+        return {'barcode': dir_name, 'failed': True, 'error': f"{type(e).__name__}: {e}"}
 
     total_count, good_count, bad_count, sum_of_lengths = 0, 0, 0, 0
     reservoir = []
     reservoir_n = 0
+    file_path = None
 
     def _open_out(path):
         if gzip_intermediate:
@@ -169,8 +413,11 @@ def filter_and_merge_directory(
                                 bad_count += 1
 
     except Exception as e:
-        print(f"ERROR during processing of {file_path.name}: {e}")
-        return None
+        source = file_path.name if file_path is not None else dir_name
+        print(f"ERROR during processing of {source}: {e}", flush=True)
+        _remove_quietly(good_file_path)
+        _remove_quietly(bad_file_path)
+        return {'barcode': dir_name, 'failed': True, 'error': f"{type(e).__name__}: {e}"}
 
     mean_len = (sum_of_lengths / total_count) if total_count > 0 else 0
     median_len = statistics.median(reservoir) if reservoir else 0
@@ -191,14 +438,127 @@ def filter_and_merge_directory(
         'good_count': good_count,
         'total_count': total_count,
         'good_file_out': str(good_file_path) if good_count > 0 else None,
+        'length_sample': _thin_length_sample(reservoir),
     }
 
 
-def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: str,
-                     kmer_size: int = 15, window_size: int = 10, debug: bool = False):
-    """OPT-A2: Pipe minimap2 → samtools sort → BAM (eliminates SAM file on disk).
+_STDERR_TAIL_LINES = 15
+_BROKEN_PIPE_EXIT = -getattr(signal, 'SIGPIPE', 13)
+_CIGAR_OPERATION = re.compile(rb'(\d+)([MIDNSHP=X])')
+_SOFT_CLIP_HEAD = re.compile(rb'(?:\d+H)?(\d+)S')
+_SOFT_CLIP_TAIL = re.compile(rb'(\d+)S(?:\d+H)?$')
 
-    Returns the path to the sorted BAM file, or None on failure.
+
+class _TimeLimit:
+    """Kill a group of processes when a time limit expires."""
+
+    def __init__(self, seconds, processes):
+        self.expired = False
+        self.seconds = seconds
+        self._processes = processes
+        self._timer = None
+        if seconds and seconds > 0:
+            self._timer = threading.Timer(seconds, self._expire)
+            self._timer.daemon = True
+            self._timer.start()
+
+    def _expire(self):
+        if all(process.poll() is not None for process in self._processes):
+            return
+        self.expired = True
+        _kill_all(self._processes)
+
+    def cancel(self):
+        if self._timer is not None:
+            self._timer.cancel()
+
+
+def _kill_all(processes):
+    for process in list(processes):
+        if process.poll() is None:
+            try:
+                process.kill()
+            except OSError:
+                pass
+
+
+def _close_quietly(stream):
+    if stream is None:
+        return
+    try:
+        stream.close()
+    except OSError:
+        pass
+
+
+def _read_tail(handle, max_lines=_STDERR_TAIL_LINES):
+    """Return the last non-empty lines written to a temporary file."""
+    try:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(0, size - 65536))
+        text = handle.read().decode('utf-8', errors='replace')
+    except (OSError, ValueError):
+        return []
+    lines = [line for line in text.splitlines() if line.strip()]
+    return lines[-max_lines:]
+
+
+def _describe_exit(tool, returncode):
+    killed_hint = " (killed: the computer or the Docker container may have run out of memory)"
+    if returncode < 0:
+        text = f"{tool} was terminated by signal {-returncode}"
+        return text + killed_hint if returncode == -9 else text
+    text = f"{tool} failed with exit status {returncode}"
+    return text + killed_hint if returncode == 137 else text
+
+
+def _report_failures(label, failures):
+    """Print which tools of a pipeline failed, with the end of their error output."""
+    for tool, returncode, command, error_lines in failures:
+        print(f"ERROR [{label}]: {_describe_exit(tool, returncode)}.", flush=True)
+        print(f"  Command: {' '.join(command)}", flush=True)
+        if error_lines:
+            print("  Last lines of its error output:", flush=True)
+            for line in error_lines:
+                print(f"    {line}", flush=True)
+
+
+def _report_time_limit(label, step, limit):
+    print(f"ERROR [{label}]: {step} exceeded the time limit of {limit.seconds:g} s per sample "
+          f"and was stopped.", flush=True)
+    print("  Raise or disable the limit (--sample-timeout) if the sample is expected to take longer.",
+          flush=True)
+
+
+def _remove_quietly(path):
+    try:
+        Path(path).unlink()
+    except OSError:
+        pass
+
+
+def _remove_partial_bam(bam_path):
+    """Delete an incomplete BAM file and the temporary files samtools sort left next to it."""
+    bam_path = Path(bam_path)
+    _remove_quietly(bam_path)
+    try:
+        leftovers = list(bam_path.parent.glob(bam_path.name + '.tmp.*'))
+    except OSError:
+        leftovers = []
+    for leftover in leftovers:
+        _remove_quietly(leftover)
+
+
+def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: str,
+                     kmer_size: int = 15, window_size: int = 10, debug: bool = False,
+                     timeout_s: float = None):
+    """Map one FASTQ file with minimap2 and write a coordinate-sorted BAM.
+
+    minimap2 is piped into samtools sort, so no SAM file is written to disk.
+    The error output of both tools goes to temporary files and the exit
+    status of both is checked. Returns the path of the BAM file, or None
+    when a tool fails, is missing, or exceeds timeout_s seconds.
     """
     try:
         fastq_path = Path(fastq_file)
@@ -222,6 +582,8 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
         print(f"ERROR in path setup for {fastq_file}: {e}")
         return None
 
+    label = fastq_path.name
+
     cmd_mm2 = [
         'minimap2',
         '-ax', 'map-ont',
@@ -240,84 +602,212 @@ def mapping_improved(fastq_file: str, db_path: str, threads: int, output_dir: st
         '-'
     ]
 
+    processes = []
+    limit = None
     try:
-        proc_mm2 = subprocess.Popen(
-            cmd_mm2, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc_sort = subprocess.Popen(
-            cmd_sort, stdin=proc_mm2.stdout,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        )
-        proc_mm2.stdout.close()
+        with tempfile.TemporaryFile() as mm2_err, tempfile.TemporaryFile() as sort_err:
+            try:
+                proc_mm2 = subprocess.Popen(cmd_mm2, stdout=subprocess.PIPE, stderr=mm2_err)
+                processes.append(proc_mm2)
+                proc_sort = subprocess.Popen(cmd_sort, stdin=proc_mm2.stdout,
+                                             stdout=subprocess.DEVNULL, stderr=sort_err)
+                processes.append(proc_sort)
+                proc_mm2.stdout.close()
+                limit = _TimeLimit(timeout_s, processes)
+                sort_rc = proc_sort.wait()
+                mm2_rc = proc_mm2.wait()
+            finally:
+                if limit is not None:
+                    limit.cancel()
+                _kill_all(processes)
+                for process in processes:
+                    process.wait()
+                    _close_quietly(process.stdout)
 
-        _, sort_stderr = proc_sort.communicate()
-        mm2_stderr = proc_mm2.stderr.read().decode('utf-8', errors='replace')
-        mm2_rc = proc_mm2.wait()
+            if limit.expired:
+                _report_time_limit(label, 'mapping', limit)
+                _remove_partial_bam(bam_output_path)
+                return None
 
-        if mm2_rc != 0:
-            print(f"ERROR running minimap2 for {fastq_path.name} (rc={mm2_rc}).", flush=True)
-            print(f"Command: {' '.join(cmd_mm2)}", flush=True)
-            if mm2_stderr:
-                print("Stderr:", mm2_stderr.strip(), flush=True)
-            return None
+            failures = []
+            if mm2_rc != 0 and not (mm2_rc == _BROKEN_PIPE_EXIT and sort_rc != 0):
+                failures.append(('minimap2', mm2_rc, cmd_mm2, _read_tail(mm2_err)))
+            if sort_rc != 0:
+                failures.append(('samtools sort', sort_rc, cmd_sort, _read_tail(sort_err)))
+            if failures:
+                _report_failures(label, failures)
+                _remove_partial_bam(bam_output_path)
+                return None
 
-        if proc_sort.returncode != 0:
-            raise subprocess.CalledProcessError(
-                proc_sort.returncode, cmd_sort,
-                stderr=sort_stderr.decode('utf-8', errors='replace')
-            )
+            if not bam_output_path.exists():
+                print(f"ERROR [{label}]: mapping ended without errors but {bam_output_path.name} "
+                      f"was not written.", flush=True)
+                return None
 
-        if debug:
-            print(f"[{fastq_path.name}] Mapping + sort complete (BAM pipe).", flush=True)
-            if mm2_stderr:
-                print("  Info (from minimap2 stderr):", flush=True)
-                print(mm2_stderr.strip(), flush=True)
+            if debug:
+                print(f"[{label}] Mapping + sort complete (BAM pipe).", flush=True)
+                mm2_lines = _read_tail(mm2_err, max_lines=40)
+                if mm2_lines:
+                    print("  Info (from minimap2 stderr):", flush=True)
+                    for line in mm2_lines:
+                        print(f"  {line}", flush=True)
 
         return str(bam_output_path)
 
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR running pipeline for {fastq_path.name}.", flush=True)
-        print(f"Command: {e.cmd}", flush=True)
-        if e.stderr:
-            print("Stderr:", e.stderr, flush=True)
+    except FileNotFoundError as e:
+        print(f"ERROR [{label}]: command not found: {e.filename}.", flush=True)
+        print("  Ensure 'minimap2' and 'samtools' are installed and on your PATH.", flush=True)
         return None
-
-    except FileNotFoundError:
-        print("CRITICAL ERROR: 'minimap2' or 'samtools' command not found.", flush=True)
-        print("Ensure both are installed and on your PATH.", flush=True)
-        sys.exit(1)
 
     except Exception as e:
-        print(f"Unexpected error during mapping of {fastq_path.name}: {e}", flush=True)
+        print(f"ERROR [{label}]: unexpected error during mapping: {e}", flush=True)
+        _remove_partial_bam(bam_output_path)
         return None
 
 
-def _parse_flagstat(flagstat_output: str) -> dict:
-    """Parse samtools flagstat output and return primary read counts."""
-    total = 0
-    mapped = 0
-    for line in flagstat_output.splitlines():
-        parts = line.split()
-        if not parts:
+def _query_length_from_cigar(cigar):
+    return sum(int(count) for count, operation in _CIGAR_OPERATION.findall(cigar)
+               if operation in b'MIS=X')
+
+
+def _edit_distance(tags):
+    """Return the value of the NM tag from the optional fields of a SAM record, or None."""
+    if tags.startswith(b'NM:i:'):
+        start = 5
+    else:
+        start = tags.find(b'\tNM:i:')
+        if start < 0:
+            return None
+        start += 6
+    end = tags.find(b'\t', start)
+    try:
+        return int(tags[start:end] if end >= 0 else tags[start:])
+    except ValueError:
+        return None
+
+
+def aligned_query_length(cigar, query_length):
+    """Number of read bases inside the alignment: read length minus soft-clipped bases."""
+    clipped = 0
+    head = _SOFT_CLIP_HEAD.match(cigar)
+    if head:
+        clipped += int(head.group(1))
+    if not (head and head.end() == len(cigar)):
+        tail = _SOFT_CLIP_TAIL.search(cigar[-24:])
+        if tail:
+            clipped += int(tail.group(1))
+    return query_length - clipped
+
+
+def passes_quality_filter(aligned_length, query_length, edit_distance,
+                          min_percent_identity, min_ref_coverage):
+    """Apply the identity and read-coverage thresholds to one alignment.
+
+    aligned_length is the read length without soft-clipped bases.
+    Identity is (aligned_length - NM) / aligned_length; read coverage is
+    aligned_length / read length. Both thresholds are percentages, the
+    comparison is inclusive, and a threshold of 0 is not applied.
+    """
+    if aligned_length <= 0:
+        return False
+    if min_percent_identity > 0.0:
+        if edit_distance is None:
+            return False
+        if (aligned_length - edit_distance) * 100 < min_percent_identity * aligned_length:
+            return False
+    if min_ref_coverage > 0.0 and aligned_length * 100 < min_ref_coverage * query_length:
+        return False
+    return True
+
+
+def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, sink=None):
+    """Count the primary alignments of a SAM stream per reference.
+
+    lines yields SAM lines as bytes, header first. Secondary and
+    supplementary records are skipped. Mapped reads that pass the identity
+    and read-coverage thresholds are counted; when sink is given, the header
+    and the records that pass are written to it unchanged.
+
+    Returns a dict with the references in header order, the counts per
+    reference, and the numbers of primary, mapped and passing reads.
+    """
+    references = []
+    counts = {}
+    total = mapped = passed = 0
+    filtering = min_percent_identity > 0.0 or min_ref_coverage > 0.0
+    write = sink.write if sink is not None else None
+    in_header = True
+
+    for line in lines:
+        if in_header:
+            if line.startswith(b'@'):
+                if line.startswith(b'@SQ\t'):
+                    name = None
+                    length = 0
+                    for field in line.rstrip(b'\r\n').split(b'\t')[1:]:
+                        if field.startswith(b'SN:'):
+                            name = field[3:]
+                        elif field.startswith(b'LN:'):
+                            length = int(field[3:])
+                    if name is not None:
+                        references.append((name, length))
+                if write is not None:
+                    write(line)
+                continue
+            in_header = False
+
+        fields = line.split(b'\t', 11)
+        if len(fields) < 11:
             continue
-        try:
-            count = int(parts[0])
-        except ValueError:
+        flag = int(fields[1])
+        if flag & 0x900:
             continue
-        if 'primary' in line and 'mapped' in line and 'secondary' not in line and 'supplementary' not in line:
-            mapped = count
-        elif 'primary' in line and 'mapped' not in line and 'duplicate' not in line:
-            total = count
-    return {'total': total, 'mapped': mapped}
+        total += 1
+        if flag & 0x4:
+            continue
+        mapped += 1
+
+        if filtering:
+            cigar = fields[5]
+            sequence = fields[9]
+            query_length = len(sequence) if sequence != b'*' else _query_length_from_cigar(cigar)
+            edit_distance = _edit_distance(fields[11]) if len(fields) > 11 else None
+            if not passes_quality_filter(aligned_query_length(cigar, query_length), query_length,
+                                         edit_distance, min_percent_identity, min_ref_coverage):
+                continue
+
+        passed += 1
+        reference = fields[2]
+        counts[reference] = counts.get(reference, 0) + 1
+        if write is not None:
+            write(line)
+
+    def _text(value):
+        return value.decode('utf-8', errors='surrogateescape')
+
+    return {
+        'references': [(_text(name), length) for name, length in references],
+        'counts': {_text(name): count for name, count in counts.items()},
+        'total_reads': total,
+        'mapped_reads': mapped,
+        'passed_reads': passed,
+    }
 
 
 def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                       min_percent_identity: float = 0.0, min_ref_coverage: float = 0.0,
-                      delete_bam: bool = False):
-    """Process alignment file (BAM or SAM) into OTU count results.
+                      delete_bam: bool = False, timeout_s: float = None):
+    """Count the primary alignments of one sample per reference.
 
-    OPT-A2: Now accepts sorted BAM from piped mapping (no intermediate SAM).
-    OPT-A4: Post-filter stats derived from idxstats (eliminates second flagstat).
+    The sorted BAM written by mapping_improved is read once. Unmapped,
+    secondary and supplementary records are left out; the identity and
+    read-coverage thresholds are evaluated on the CIGAR string and the NM
+    tag of each alignment, so the result does not depend on the
+    filter-expression support of the installed samtools. The alignments
+    that pass are also written to <sample>_sorted_filtered.bam.
+
+    Returns the mapping statistics of the sample, or None when a tool
+    fails, is missing, or exceeds timeout_s seconds.
     """
     fname = "unknown"
     filtered_sorted_bam = None
@@ -347,20 +837,9 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         print(f"[{fname}] Error in path setup: {e}")
         return None
 
-    quality_conditions = []
-    if min_percent_identity > 0.0:
-        quality_conditions.append(
-            f"((qlen-sclen)-[NM])*100>={min_percent_identity}*(qlen-sclen)"
-        )
-    if min_ref_coverage > 0.0:
-        quality_conditions.append(
-            f"(qlen-sclen)*100>={min_ref_coverage}*qlen"
-        )
-    e_filter_args = []
-    if quality_conditions:
-        combined_expr = " && ".join(quality_conditions)
-        e_filter_args = ['-e', combined_expr]
-        print(f"[{fname}] Quality filter expression: {combined_expr}", flush=True)
+    if min_percent_identity > 0.0 or min_ref_coverage > 0.0:
+        print(f"[{fname}] Quality filter: identity >= {min_percent_identity}%, "
+              f"read coverage >= {min_ref_coverage}%", flush=True)
 
     mapping_stats = {
         'sample': fname,
@@ -373,74 +852,118 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         'min_ref_coverage': min_ref_coverage,
     }
 
+    cmd_read = ['samtools', 'view', f'-@{thread_str}', '-h', '-F', '0x900', str(input_bam)]
+    cmd_write = ['samtools', 'view', f'-@{thread_str}', '-b', '-o', str(filtered_sorted_bam), '-']
+    cmd_index = ['samtools', 'index', f'-@{thread_str}', str(filtered_sorted_bam)]
+
+    if debug:
+        print(f"[{fname}] CMD (read): {' '.join(cmd_read)}", flush=True)
+        print(f"[{fname}] CMD (write): {' '.join(cmd_write)}", flush=True)
+
+    processes = []
+    limit = None
+    completed = False
+    started = time.monotonic()
     try:
-        result_flagstat_raw = subprocess.run(
-            ['samtools', 'flagstat', f'-@{thread_str}', input_bam],
-            check=True, capture_output=True, text=True, encoding='utf-8'
-        )
-        stats_raw = _parse_flagstat(result_flagstat_raw.stdout)
-        mapping_stats['total_reads'] = stats_raw['total']
-        mapping_stats['mapped_unfiltered'] = stats_raw['mapped']
-        if stats_raw['total'] > 0:
-            mapping_stats['mapping_rate_pct'] = round(stats_raw['mapped'] / stats_raw['total'] * 100, 2)
+        with tempfile.TemporaryFile() as read_err, tempfile.TemporaryFile() as write_err:
+            counted = None
+            stream_error = None
+            try:
+                proc_read = subprocess.Popen(cmd_read, stdout=subprocess.PIPE, stderr=read_err,
+                                             bufsize=1_048_576)
+                processes.append(proc_read)
+                proc_write = subprocess.Popen(cmd_write, stdin=subprocess.PIPE,
+                                              stdout=subprocess.DEVNULL, stderr=write_err,
+                                              bufsize=1_048_576)
+                processes.append(proc_write)
+                limit = _TimeLimit(timeout_s, processes)
+                try:
+                    counted = tabulate_sam_stream(proc_read.stdout, min_percent_identity,
+                                                  min_ref_coverage, sink=proc_write.stdin)
+                    proc_write.stdin.close()
+                except BrokenPipeError:
+                    counted = None
+                except ValueError as e:
+                    counted = None
+                    stream_error = e
+                    _kill_all(processes)
+                _close_quietly(proc_write.stdin)
+                _close_quietly(proc_read.stdout)
+                read_rc = proc_read.wait()
+                write_rc = proc_write.wait()
+            finally:
+                if limit is not None:
+                    limit.cancel()
+                _kill_all(processes)
+                for process in processes:
+                    process.wait()
+                    _close_quietly(process.stdin)
+                    _close_quietly(process.stdout)
 
-        ll1_unmapped = stats_raw['total'] - stats_raw['mapped']
-        ll1 = f"*\t0\t0\t{ll1_unmapped}"
+            if limit.expired:
+                _report_time_limit(fname, 'counting the alignments', limit)
+                return None
+
+            if stream_error is not None:
+                print(f"ERROR [{fname}]: the alignment records could not be read: {stream_error}",
+                      flush=True)
+                return None
+
+            failures = []
+            if read_rc != 0 and not (read_rc == _BROKEN_PIPE_EXIT and write_rc != 0):
+                failures.append(('samtools view', read_rc, cmd_read, _read_tail(read_err)))
+            if write_rc != 0:
+                failures.append(('samtools view', write_rc, cmd_write, _read_tail(write_err)))
+            if failures or counted is None:
+                if failures:
+                    _report_failures(fname, failures)
+                else:
+                    print(f"ERROR [{fname}]: writing the filtered alignments was interrupted.",
+                          flush=True)
+                return None
+
+        index_timeout = None
+        if timeout_s and timeout_s > 0:
+            index_timeout = max(1.0, timeout_s - (time.monotonic() - started))
+        try:
+            index_run = subprocess.run(cmd_index, capture_output=True, timeout=index_timeout)
+        except subprocess.TimeoutExpired:
+            _report_time_limit(fname, 'indexing the alignments', limit)
+            return None
+        if index_run.returncode != 0:
+            error_lines = index_run.stderr.decode('utf-8', errors='replace').splitlines()
+            _report_failures(fname, [('samtools index', index_run.returncode, cmd_index,
+                                      [line for line in error_lines if line.strip()][-_STDERR_TAIL_LINES:])])
+            return None
+
+        mapping_stats['total_reads'] = counted['total_reads']
+        mapping_stats['mapped_unfiltered'] = counted['mapped_reads']
+        if counted['total_reads'] > 0:
+            mapping_stats['mapping_rate_pct'] = round(
+                counted['mapped_reads'] / counted['total_reads'] * 100, 2
+            )
+        unmapped = counted['total_reads'] - counted['mapped_reads']
 
         if debug:
-            print(f"[{fname}] Pre-filter: total={stats_raw['total']}, mapped={stats_raw['mapped']}", flush=True)
-
-        cmd_view = [
-            'samtools', 'view', f'-@{thread_str}', '-b', '-F', '0x904',
-        ] + e_filter_args + [input_bam]
-        cmd_sort = [
-            'samtools', 'sort', f'-@{thread_str}', '-o', str(filtered_sorted_bam), '-',
-        ]
-        if debug:
-            print(f"[{fname}] CMD (view): {' '.join(cmd_view)}", flush=True)
-            print(f"[{fname}] CMD (sort): {' '.join(cmd_sort)}", flush=True)
-        proc_view = subprocess.Popen(cmd_view, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        proc_sort = subprocess.Popen(cmd_sort, stdin=proc_view.stdout,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        proc_view.stdout.close()
-        _, sort_stderr = proc_sort.communicate()
-        view_rc = proc_view.wait()
-        if view_rc != 0:
-            raise subprocess.CalledProcessError(view_rc, cmd_view)
-        if proc_sort.returncode != 0:
-            raise subprocess.CalledProcessError(proc_sort.returncode, cmd_sort, stderr=sort_stderr)
-
-        subprocess.run(['samtools', 'index', f'-@{thread_str}', str(filtered_sorted_bam)],
-                       check=True, capture_output=True)
-
-        result_idxstats = subprocess.run(
-            ['samtools', 'idxstats', f'-@{thread_str}', str(filtered_sorted_bam)],
-            check=True, capture_output=True, text=True, encoding='utf-8'
-        )
+            print(f"[{fname}] Pre-filter: total={counted['total_reads']}, "
+                  f"mapped={counted['mapped_reads']}", flush=True)
 
         total_mapped_filtered = 0
-        unmapped_in_filtered = 0
         per_ref_counts = []
-        with open(results_file, 'w', encoding='utf-8') as f:
-            for line in result_idxstats.stdout.splitlines():
-                parts = line.strip().split('\t')
-                if not parts or not parts[0]:
-                    continue
-                if parts[0] == '*':
-                    unmapped_in_filtered = int(parts[3]) if len(parts) >= 4 else 0
-                    continue
-                if len(parts) >= 3 and parts[2] != '0':
-                    ref_count = int(parts[2])
+        with open(results_file, 'w', encoding='utf-8', errors='surrogateescape') as f:
+            for reference, length in counted['references']:
+                ref_count = counted['counts'].get(reference, 0)
+                if ref_count:
                     total_mapped_filtered += ref_count
-                    per_ref_counts.append((parts[0], ref_count))
-                    f.write(line.strip() + '\n')
-            f.write(ll1 + '\n')
-            f.write(f"*\t0\t0\t{unmapped_in_filtered}\n")
+                    per_ref_counts.append((reference, ref_count))
+                    f.write(f"{reference}\t{length}\t{ref_count}\t0\n")
+            f.write(f"*\t0\t0\t{unmapped}\n")
+            f.write("*\t0\t0\t0\n")
 
         mapping_stats['mapped_filtered'] = total_mapped_filtered
-        if stats_raw['mapped'] > 0:
+        if counted['mapped_reads'] > 0:
             mapping_stats['quality_retention_pct'] = round(
-                total_mapped_filtered / stats_raw['mapped'] * 100, 2
+                total_mapped_filtered / counted['mapped_reads'] * 100, 2
             )
 
         mapping_stats['references_detected'] = len(per_ref_counts)
@@ -470,24 +993,27 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
             }
 
         if debug:
-            print(f"[{fname}] Post-filter: mapped={total_mapped_filtered} (from idxstats)", flush=True)
+            print(f"[{fname}] Post-filter: mapped={total_mapped_filtered}", flush=True)
             print(f"--- [Tabeling: {fname}] Complete ---", flush=True)
 
+        completed = True
         return mapping_stats
 
-    except subprocess.CalledProcessError as e:
-        print(f"ERROR [Tabeling: {fname}].", flush=True)
-        print(f"Failed command: {e.cmd}", flush=True)
-        print("Stderr:", flush=True)
-        print(e.stderr, flush=True)
+    except FileNotFoundError as e:
+        print(f"ERROR [{fname}]: command not found: {e.filename}.", flush=True)
+        print("  Ensure 'samtools' is installed and on your PATH.", flush=True)
         return None
 
-    except FileNotFoundError as e:
-        print(f"CRITICAL ERROR: Command not found. {e}", flush=True)
-        print("Ensure 'samtools' is installed and on your PATH.", flush=True)
-        sys.exit(1)
+    except Exception as e:
+        print(f"ERROR [{fname}]: unexpected error while counting the alignments: {e}", flush=True)
+        return None
 
     finally:
+        if not completed:
+            _remove_quietly(results_file)
+        if not completed and filtered_sorted_bam is not None and not delete_bam:
+            _remove_quietly(filtered_sorted_bam)
+            _remove_quietly(f"{filtered_sorted_bam}.bai")
         if delete_bam:
             for p in [filtered_sorted_bam,
                       Path(f"{filtered_sorted_bam}.bai") if filtered_sorted_bam else None,

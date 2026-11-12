@@ -1,7 +1,11 @@
+import re
 import subprocess
 import sys
 import os
 import signal
+import threading
+import time
+import uuid
 from pathlib import Path
 
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer
@@ -9,6 +13,9 @@ from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot, QTimer
 from venv_manager import get_venv_python
 
 DOCKER_IMAGE = "loreon:latest"
+PARTIAL_FAILURE_EXIT_CODE = 3
+_STEP4_PROGRESS = re.compile(r'Step 4 progress: (\d+)/(\d+) samples completed')
+_SAMPLES_FAILED = re.compile(r'(\d+ of \d+ samples failed)')
 
 
 def _app_root() -> Path:
@@ -28,12 +35,17 @@ class PipelineWorker(QObject):
     log_signal = pyqtSignal(str)
     progress_signal = pyqtSignal(int, str)
     finished_signal = pyqtSignal(bool, str)
+    warning_signal = pyqtSignal(str)
 
     def __init__(self):
         super().__init__()
         self.is_running = False
         self.process = None
         self.settings = {}
+        self.last_return_code = None
+        self._container_name = None
+        self._kill_thread = None
+        self._failed_samples_text = None
 
     @pyqtSlot(dict)
     def run(self, settings):
@@ -42,22 +54,34 @@ class PipelineWorker(QObject):
 
         self.is_running = True
         self.settings = settings
+        self._failed_samples_text = None
 
         try:
             use_docker = settings.get("use_docker", False)
 
             cmd_pipeline = self._build_docker_pipeline_cmd() if use_docker else self._build_native_pipeline_cmd()
             success_pipeline = self.run_process(cmd_pipeline)
+            partial_failure = (not success_pipeline
+                               and self.last_return_code == PARTIAL_FAILURE_EXIT_CODE)
 
-            if not self.is_running or not success_pipeline:
+            if not self.is_running or not (success_pipeline or partial_failure):
                 self.finished_signal.emit(False, None)
                 self.is_running = False
                 return
+
+            if partial_failure:
+                self.warning_signal.emit(
+                    self._failed_samples_text or "Some samples failed"
+                )
 
             self.progress_signal.emit(95, "Step 7: HTML Report generation...")
 
             cmd_report = self._build_docker_report_cmd() if use_docker else self._build_native_report_cmd()
             success_report = self.run_process(cmd_report)
+
+            if not self.is_running:
+                self.finished_signal.emit(False, None)
+                return
 
             if not success_report:
                 self.log_signal.emit("[ERROR] report_generator.py failed.")
@@ -96,8 +120,11 @@ class PipelineWorker(QObject):
         else:
             self.log_signal.emit("[INFO] Length filter disabled.")
             cmd.extend(["-min", "0", "-max", "999999"])
-        cmd.extend(["--min-percent-identity", str(self.settings.get("min_percent_identity", 95.0))])
-        cmd.extend(["--min-ref-coverage", str(self.settings.get("min_ref_coverage", 90.0))])
+        cmd.extend(["--min-percent-identity", str(self.settings.get("min_percent_identity", 0.0))])
+        cmd.extend(["--min-ref-coverage", str(self.settings.get("min_ref_coverage", 0.0))])
+        sample_timeout = self.settings.get("sample_timeout_min", 0)
+        if sample_timeout and sample_timeout > 0:
+            cmd.extend(["--sample-timeout", str(sample_timeout)])
         if self.settings.get("force_tax_map", False):
             cmd.append("--force-tax-map")
         if self.settings.get("profile", False):
@@ -174,8 +201,10 @@ class PipelineWorker(QObject):
         input_dir = Path(self.settings["input_dir"])
         output_dir = Path(self.settings["output_dir"])
         db_path = Path(self.settings["db_path"])
+        self._container_name = f"loreon-{uuid.uuid4().hex[:12]}"
         return [
             "docker", "run", "--rm",
+            "--name", self._container_name,
             "-v", f"{self._docker_path(input_dir)}:/data/input:ro",
             "-v", f"{self._docker_path(output_dir)}:/data/output",
             "-v", f"{self._docker_path(db_path.parent)}:/data/db",
@@ -218,6 +247,7 @@ class PipelineWorker(QObject):
             cmd_str = ' '.join(f'"{arg}"' if ' ' in arg else arg for arg in command_list)
             self.log_signal.emit(f"[DEBUG] Command: {cmd_str}")
         local_return_code = -1
+        self.last_return_code = None
         try:
             popen_kwargs = {}
             if sys.platform != 'win32':
@@ -236,8 +266,12 @@ class PipelineWorker(QObject):
                         self.update_progress_from_log(line)
                     if not self.is_running:
                         break
+            if not self.is_running and self.process.poll() is None:
+                self._request_container_stop()
+                self._terminate_local_process(self.process)
             self.process.wait()
             local_return_code = self.process.returncode
+            self.last_return_code = local_return_code
         except Exception as e:
             self.log_signal.emit(f"[SUBPROCESS Error] {e}")
             self.is_running = False
@@ -258,10 +292,95 @@ class PipelineWorker(QObject):
             self.progress_signal.emit(40, "Step 3: Filter Report...")
         elif "STEP 4:" in line:
             self.progress_signal.emit(50, "Step 4: Mapping/Tabeling...")
+        elif "Step 4 progress:" in line:
+            match = _STEP4_PROGRESS.search(line)
+            if match and int(match.group(2)) > 0:
+                done, total = int(match.group(1)), int(match.group(2))
+                self.progress_signal.emit(
+                    50 + int(35 * done / total),
+                    f"Step 4: Mapping/Tabeling... {done}/{total} samples"
+                )
+        elif "samples failed" in line:
+            match = _SAMPLES_FAILED.search(line)
+            if match:
+                self._failed_samples_text = match.group(1)
         elif "STEP 5:" in line:
             self.progress_signal.emit(85, "Step 5: Reformatting...")
         elif "STEP 6:" in line:
             self.progress_signal.emit(90, "Step 6: OTU Aggregation...")
+
+    def _kill_container(self, name):
+        """Stop the Docker container that runs the pipeline.
+
+        Ending the local 'docker run' client does not stop the container, so
+        it is killed by name. The attempt is repeated for a few seconds to
+        cover a container that was still being created when Stop was pressed.
+        """
+        extra = {}
+        if sys.platform == 'win32':
+            extra['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+        for _ in range(5):
+            try:
+                result = subprocess.run(
+                    ['docker', 'kill', name],
+                    capture_output=True, text=True, timeout=30, **extra
+                )
+            except (OSError, subprocess.TimeoutExpired) as e:
+                self.log_signal.emit(f"Error during stop (docker kill): {e}")
+                return
+            if result.returncode == 0:
+                self.log_signal.emit(f"--- Docker container {name} stopped ---")
+                return
+            time.sleep(1.0)
+
+    def _request_container_stop(self):
+        """Start stopping the pipeline container in the background, unless already requested."""
+        if not (self.settings.get("use_docker", False) and self._container_name):
+            return
+        if self._kill_thread is not None and self._kill_thread.is_alive():
+            return
+        self._kill_thread = threading.Thread(
+            target=self._kill_container, args=(self._container_name,), daemon=True
+        )
+        self._kill_thread.start()
+
+    def wait_for_container_stop(self, timeout=None):
+        """Wait until a requested container stop has completed. Returns False on timeout."""
+        thread = self._kill_thread
+        if thread is None:
+            return True
+        thread.join(timeout)
+        return not thread.is_alive()
+
+    @staticmethod
+    def _terminate_local_process(proc):
+        """End a pipeline process that is still running after a stop request.
+
+        Used by the worker thread when the process was started while the stop
+        request was being handled, so stop() could not reach it.
+        """
+        if sys.platform == 'win32':
+            try:
+                subprocess.run(
+                    ['taskkill', '/F', '/T', '/PID', str(proc.pid)],
+                    capture_output=True,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+                )
+            except OSError:
+                pass
+            return
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, OSError):
+            return
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(pgid, signal.SIGKILL)
+            except (ProcessLookupError, OSError):
+                pass
 
     @pyqtSlot()
     def stop(self):
@@ -269,11 +388,11 @@ class PipelineWorker(QObject):
         the GUI thread even while the worker thread is blocked in a readline
         loop inside run_process().
 
-        Strategy: send SIGTERM to the whole process group (so minimap2,
-        samtools and mp.Pool workers all receive it), then escalate to
-        SIGKILL after 3 s if the tree is still alive — multiprocessing
-        workers blocked on subprocess.communicate() do not always react to
-        SIGTERM in time.
+        Strategy: in Docker mode the container is killed by name from a
+        background thread, so the interface is not blocked. Then SIGTERM is
+        sent to the whole local process group (so minimap2, samtools and
+        mp.Pool workers all receive it), escalating to SIGKILL after 3 s if
+        the tree is still alive.
         """
         if not self.is_running:
             self.log_signal.emit("--- Request Interrupt (not running) ---")
@@ -288,11 +407,14 @@ class PipelineWorker(QObject):
         self.log_signal.emit("--- STOPPING PIPELINE (killing process tree) ---")
         pid = proc.pid
 
+        self._request_container_stop()
+
         if sys.platform == 'win32':
             try:
                 subprocess.run(
                     ['taskkill', '/F', '/T', '/PID', str(pid)],
-                    capture_output=True
+                    capture_output=True,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0)
                 )
             except Exception as e:
                 self.log_signal.emit(f"Error during stop (taskkill): {e}")

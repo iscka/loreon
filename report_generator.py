@@ -78,10 +78,10 @@ def extract_filter_params(filter_report_path, cli_min_len, cli_max_len, mapping_
                 max_len = int(m.group(2))
 
     if min_len is not None and max_len is not None:
-        len_active = not (min_len == 0 and max_len >= 999999)
-        params['len_filter_active'] = len_active
+        has_upper_limit = 0 < max_len < 999999
+        params['len_filter_active'] = min_len > 0 or has_upper_limit
         params['min_len'] = min_len
-        params['max_len'] = max_len
+        params['max_len'] = max_len if has_upper_limit else 0
     else:
         params['len_filter_active'] = None
         params['min_len'] = None
@@ -185,7 +185,7 @@ def generate_mapping_graphs(mapping_data):
         if params.get('min_percent_identity', 0) > 0:
             title_parts.append(f"Identity ≥ {params['min_percent_identity']}%")
         if params.get('min_ref_coverage', 0) > 0:
-            title_parts.append(f"Ref Coverage ≥ {params['min_ref_coverage']}%")
+            title_parts.append(f"Read Coverage ≥ {params['min_ref_coverage']}%")
         filter_desc = " | ".join(title_parts)
         fig_quality = px.bar(
             df_qlong, x='sample', y='Reads', color='Category',
