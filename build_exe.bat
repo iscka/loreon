@@ -53,6 +53,7 @@ if exist .dockerignore copy .dockerignore dist\LOREON\
 copy loreon_app_icon_2.png dist\LOREON\
 copy loreon.jpeg dist\LOREON\
 copy credits.md dist\LOREON\
+copy LICENSE dist\LOREON\
 copy metaGenomics_new.py dist\LOREON\
 copy OtuUtils.py dist\LOREON\
 copy ResultsReader.py dist\LOREON\
@@ -60,6 +61,7 @@ copy PipelineLogger.py dist\LOREON\
 copy report_generator.py dist\LOREON\
 copy pipeline_profiler.py dist\LOREON\
 copy template.html dist\LOREON\
+xcopy /E /I /Y example_data dist\LOREON\example_data
 
 echo.
 echo BUILD COMPLETATA!

@@ -14,13 +14,22 @@ from functools import partial
 import pandas as pd
 try:
     from OtuUtils import (
+        EXAMPLE_DATABASE,
+        EXAMPLE_DIR,
+        EXAMPLE_EXPECTED_TABLE,
+        EXAMPLE_READS,
+        INPUT_LAYOUT_HELP,
         LENGTH_PRESETS,
+        LOREON_VERSION,
         NO_UPPER_LIMIT,
+        compare_otu_tables,
         create_taxonomy_map_from_fasta,
         filter_and_merge_directory,
+        find_input_samples,
         length_filter_advice,
         length_filter_is_active,
         mapping_improved,
+        sample_name_of,
         tabeling_improved,
         _parse_fasta_headers
     )
@@ -36,19 +45,36 @@ EXIT_PARTIAL_FAILURE = 3
 
 
 def parse_arguments(argv=None):
-    parser = argparse.ArgumentParser(description="LOREON Pipeline v1.0")
+    parser = argparse.ArgumentParser(description=f"LOREON Pipeline v{LOREON_VERSION}")
     io_group = parser.add_argument_group('Input/Output')
     io_group.add_argument(
-        "-i", "--input_dir", help="Input directory (containing barcodeXX folders and unclassified).",
-        required=True, type=str
+        "-i", "--input_dir",
+        help="Input directory: one sub-folder per sample (e.g. barcodeXX), or "
+             "one FASTQ file per sample placed directly in the folder.",
+        type=str
     )
     io_group.add_argument(
         "-o", "--output_dir", help="Output directory.",
-        required=True, type=str
+        type=str
     )
     io_group.add_argument(
         "-d", "--db_path", help="Path to the FASTA database.",
-        required=True, type=str
+        type=str
+    )
+    io_group.add_argument(
+        "--example",
+        help="Analyse the example dataset shipped with LOREON, with default "
+             "settings, and compare the result with its expected table. Only "
+             "-o (default: ./loreon_example_output) and the thread options are "
+             "taken into account. Use it to check an installation.",
+        action="store_true"
+    )
+    io_group.add_argument(
+        "--expected-table",
+        help="After the run, compare the read counts of the OTU table with "
+             "this table (a .tsv written by LOREON). The run ends with status 1 "
+             "if they differ.",
+        type=str, default=None, metavar="TSV"
     )
     io_group.add_argument(
         "-f", "--format",
@@ -146,7 +172,7 @@ def parse_arguments(argv=None):
     )
     other_group.add_argument(
         "--delete-bam",
-        help="Delete BAM and SAM files after tabeling to free disk space.",
+        help="Delete BAM and SAM files after tabulation to free disk space.",
         action="store_true"
     )
     other_group.add_argument(
@@ -161,7 +187,74 @@ def parse_arguments(argv=None):
              "(collapse multiple reference accessions sharing the same SH).",
         action="store_true"
     )
-    return parser.parse_args(argv)
+    options = parser.parse_args(argv)
+    if not options.example:
+        missing = [flag for flag, value in (('-i/--input_dir', options.input_dir),
+                                            ('-o/--output_dir', options.output_dir),
+                                            ('-d/--db_path', options.db_path)) if not value]
+        if missing:
+            parser.error(f"the following arguments are required: {', '.join(missing)} "
+                         f"(or use --example)")
+    return options
+
+
+def use_example_dataset(options):
+    """Point the run to the example dataset and reset the settings that change its result."""
+    if not (EXAMPLE_READS.is_dir() and EXAMPLE_DATABASE.is_file() and EXAMPLE_EXPECTED_TABLE.is_file()):
+        print(f"CRITICAL ERROR: the example dataset was not found in {EXAMPLE_DIR}.")
+        sys.exit(1)
+    ignored = [flag for flag, given in (
+        ('-i', options.input_dir is not None),
+        ('-d', options.db_path is not None),
+        ('-f', options.format != 'unite'),
+        ('--expected-table', options.expected_table is not None),
+        ('-min', options.min_len is not None),
+        ('-max', options.max_len is not None),
+        ('--preset', options.preset is not None),
+        ('--min-percent-identity', options.min_percent_identity != 0.0),
+        ('--min-ref-coverage', options.min_ref_coverage != 0.0),
+        ('-k', options.kmer_size != 15),
+        ('-w', options.window_size != 10),
+        ('--flat-sh', options.flat_sh),
+    ) if given]
+    options.input_dir = str(EXAMPLE_READS)
+    options.db_path = str(EXAMPLE_DATABASE)
+    options.expected_table = str(EXAMPLE_EXPECTED_TABLE)
+    if not options.output_dir:
+        options.output_dir = str(Path.cwd() / 'loreon_example_output')
+    options.format = 'unite'
+    options.min_len = options.max_len = options.preset = None
+    options.min_percent_identity = options.min_ref_coverage = 0.0
+    options.kmer_size, options.window_size = 15, 10
+    options.flat_sh = False
+    options.force_tax_map = True
+    print("Example dataset: three mock-community samples of 500 reads each and a subset of the "
+          "UNITE database, analysed with the default settings.")
+    print(f"  Output folder: {options.output_dir}")
+    if ignored:
+        print(f"  Options ignored with --example: {', '.join(ignored)}.")
+
+
+def check_against_expected_table(expected_table, observed_table):
+    """Print how the OTU table compares with an expected one. Returns True when the counts agree."""
+    if not observed_table.exists():
+        print(f"\nResult check FAILED: no OTU table was written to {observed_table.name}.")
+        return False
+    try:
+        differences = compare_otu_tables(expected_table, observed_table)
+    except (OSError, ValueError, IndexError) as e:
+        print(f"\nResult check FAILED: the tables could not be compared ({type(e).__name__}: {e}).")
+        return False
+    if differences:
+        print(f"\nResult check FAILED: the OTU table differs from the expected table "
+              f"({expected_table}):")
+        for line in differences:
+            print(f"  {line}")
+        print("  Different versions of minimap2 can assign a few reads differently: the versions")
+        print("  used in this run are listed at the top of the log.")
+        return False
+    print(f"\nResult check: the OTU table matches the expected table ({expected_table.name}).")
+    return True
 
 
 def resolve_length_window(min_len, max_len, preset):
@@ -297,7 +390,12 @@ def main():
             pass
 
     options = parse_arguments()
-    print("--- Metagenomic Pipeline Start (v1.0) ---")
+    print(f"--- Metagenomic Pipeline Start (v{LOREON_VERSION}) ---")
+    if options.example:
+        use_example_dataset(options)
+    if options.expected_table and not Path(options.expected_table).is_file():
+        print(f"CRITICAL ERROR: the expected table was not found: {options.expected_table}")
+        sys.exit(1)
 
     requested_min, requested_max = options.min_len, options.max_len
     options.min_len, options.max_len = resolve_length_window(
@@ -332,8 +430,12 @@ def main():
     mapping_dir = output_dir / 'mapping'
     results_dir = output_dir / 'tabeling' / 'results'
 
-    mapping_dir.mkdir(parents=True, exist_ok=True)
-    results_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        mapping_dir.mkdir(parents=True, exist_ok=True)
+        results_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"CRITICAL ERROR: the output folder cannot be created or written: {output_dir} ({e})")
+        sys.exit(1)
 
     analysis_name = output_dir.name
     db_name = db_path.stem
@@ -397,19 +499,40 @@ def main():
         print(f"  Alignment quality filter: Min read coverage = {options.min_ref_coverage}%")
 
     try:
-        directories_to_process = [
-            d for d in input_dir.iterdir()
-            if d.is_dir() and not d.name.startswith('.')
-        ]
-    except FileNotFoundError:
+        found_input = find_input_samples(input_dir)
+    except (FileNotFoundError, NotADirectoryError):
         print(f"ERROR: Input directory not found: {input_dir}")
         sys.exit(1)
 
+    directories_to_process = found_input['sources']
     if not directories_to_process:
-        print(f"ERROR: No subdirectories (e.g. barcodeXX, unclassified) found in {input_dir}.")
+        print(f"ERROR: No FASTQ files found in {input_dir}.")
+        for line in INPUT_LAYOUT_HELP:
+            print(line)
         sys.exit(1)
 
-    print(f"Found {len(directories_to_process)} directories to process...")
+    if found_input['layout'] == 'files':
+        names = {}
+        for source in directories_to_process:
+            names.setdefault(sample_name_of(source), []).append(source.name)
+        clashes = {name: files for name, files in names.items() if len(files) > 1}
+        if clashes:
+            print("ERROR: these files would get the same sample name:")
+            for name, files in sorted(clashes.items()):
+                print(f"    {name}: {', '.join(files)}")
+            print("  Keep one file per sample, or put the files of each sample in a sub-folder.")
+            sys.exit(1)
+        print(f"Found {len(directories_to_process)} FASTQ files in the input folder: "
+              f"each file is one sample.")
+    else:
+        print(f"Found {len(directories_to_process)} directories to process...")
+        ignored = found_input['ignored']
+        if ignored:
+            shown = ', '.join(path.name for path in ignored[:10])
+            more = f" and {len(ignored) - 10} more" if len(ignored) > 10 else ""
+            print(f"WARNING: {len(ignored)} FASTQ files placed directly in the input folder are "
+                  f"ignored, because the folder also contains sub-folders with reads: {shown}{more}.")
+            print("  Move them into a sub-folder to include them as a sample.")
 
     total_threads = max(1, options.total_threads)
     parallel_jobs = min(
@@ -506,7 +629,7 @@ def main():
 
     if profiler:
         profiler.start_step('Step 4: Mapping')
-    print("\n--- STEP 4: Mapping and Tabeling ---")
+    print("\n--- STEP 4: Mapping and Tabulation ---")
 
     fastq_files_to_process = [
         Path(stats['good_file_out']) for stats in filter_stats_list
@@ -528,7 +651,9 @@ def main():
 
     if not fastq_files_to_process:
         if total_reads_in == 0:
-            print(f"ERROR: No reads found in the subdirectories of {input_dir}. Cannot map.")
+            print(f"ERROR: No reads found in {input_dir}. Cannot map.")
+            for line in INPUT_LAYOUT_HELP:
+                print(line)
         else:
             print(f"ERROR: No reads left after the read-length filter "
                   f"(Min: {options.min_len}, Max: {max_len_text}). Cannot map.")
@@ -686,6 +811,15 @@ def main():
         profiler.start_step('Step 5: OTU Aggregation')
     print("\n--- STEP 5: Results Aggregation ---")
 
+    for earlier_table in (final_output_file, final_output_file.with_suffix('.tsv')):
+        try:
+            earlier_table.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError as e:
+            print(f"WARNING: the table of an earlier run could not be removed "
+                  f"({earlier_table.name}: {e}).")
+
     table_written = False
     try:
         table_written = makeOtu_duckdb(
@@ -711,11 +845,22 @@ def main():
     if failed_samples:
         print(f"\n--- Pipeline Complete with errors: {len(failed_samples)} of "
               f"{total_samples} samples failed ---")
-        print(f"OTU table saved to: {final_output_file.name}")
-        sys.exit(EXIT_PARTIAL_FAILURE)
-
-    print(f"\n--- Pipeline Complete ---")
+    else:
+        print(f"\n--- Pipeline Complete ---")
     print(f"OTU table saved to: {final_output_file.name}")
+
+    result_matches = True
+    if options.expected_table:
+        result_matches = check_against_expected_table(
+            Path(options.expected_table), final_output_file.with_suffix('.tsv')
+        )
+        if result_matches and options.example and not failed_samples:
+            print("The installation works.")
+
+    if failed_samples:
+        sys.exit(EXIT_PARTIAL_FAILURE)
+    if not result_matches:
+        sys.exit(1)
 
 
 if __name__ == "__main__":

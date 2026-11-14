@@ -1,10 +1,10 @@
 ; ============================================================
-;  LOREON v1.0 - Inno Setup 6 Installer Script
+;  LOREON - Inno Setup 6 Installer Script
 ;  Requires: Inno Setup 6.3+  (testato su 6.7.1)
 ; ============================================================
 
 #define AppName      "LOREON"
-#define AppVersion   "1.0"
+#define AppVersion   "1.1.0"
 #define AppPublisher "University of Perugia"
 #define AppURL       "https://github.com/iscka/loreon"
 #define AppExeName   "LOREON.exe"

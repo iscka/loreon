@@ -323,3 +323,84 @@ def test_closing_the_window_during_a_run_waits_for_the_container_to_stop(window,
     window.is_running = True
     window.close()
     assert len(waited) == 1
+
+
+def test_start_is_refused_with_instructions_when_components_are_missing(window, dialogs, tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline_gui, 'environment_problems',
+                        lambda use_docker: ['samtools was not found: install it with conda'])
+    window.input_dir_label.setText(str(tmp_path))
+    window.output_dir_label.setText(str(tmp_path))
+    window.db_label.setText(str(tmp_path / 'db.fasta'))
+    window.run_pipeline()
+    assert window.is_running is False
+    assert dialogs and dialogs[-1][0] == 'critical'
+    assert 'samtools was not found' in dialogs[-1][1]
+    assert not (tmp_path / 'pipeline.log').exists()
+
+
+def test_window_reports_missing_components_when_it_opens(app, dialogs, monkeypatch):
+    monkeypatch.setattr(pipeline_gui, 'environment_problems',
+                        lambda use_docker: ['minimap2 was not found: install it with conda'])
+    main_window = pipeline_gui.MainWindow()
+    try:
+        assert 'minimap2 was not found' in main_window.log_output.toPlainText()
+    finally:
+        main_window.close()
+        app.processEvents()
+
+
+def test_example_button_fills_the_form_and_starts(window, tmp_path, monkeypatch):
+    started = []
+    monkeypatch.setattr(window, 'run_pipeline', lambda: started.append(window.collect_settings()))
+    monkeypatch.setattr(pipeline_gui, 'default_example_output_dir', lambda: tmp_path / 'example_out')
+    window.length_mode_combo.setCurrentIndex(window.length_mode_combo.findData('its1'))
+    window.min_identity_input.setValue(97.0)
+    window.example_btn.click()
+    assert len(started) == 1
+    settings = started[0]
+    assert settings['input_dir'] == str(OtuUtils.EXAMPLE_READS)
+    assert settings['db_path'] == str(OtuUtils.EXAMPLE_DATABASE)
+    assert settings['output_dir'] == str(tmp_path / 'example_out')
+    assert (tmp_path / 'example_out').is_dir()
+    assert settings['format'] == 'unite'
+    assert settings['enable_filter'] is False
+    assert settings['min_percent_identity'] == 0.0 and settings['min_ref_coverage'] == 0.0
+
+
+def test_example_run_writes_its_taxonomy_map_to_the_output_folder(window, tmp_path, monkeypatch):
+    sent = []
+    window.start_pipeline_signal.disconnect()
+    window.start_pipeline_signal.connect(sent.append)
+    monkeypatch.setattr(pipeline_gui, 'environment_problems', lambda use_docker: [])
+    monkeypatch.setattr(pipeline_gui, 'default_example_output_dir', lambda: tmp_path / 'example_out')
+    monkeypatch.setattr(window, '_docker_available', lambda: True)
+    window.docker_check.setChecked(True)
+    window.example_btn.click()
+    assert len(sent) == 1
+    assert sent[0]['force_tax_map'] is True
+    assert window.force_tax_map_check.isChecked() is False
+    window.pipeline_finished(False, None)
+    window.run_pipeline()
+    assert len(sent) == 2
+    assert sent[1]['force_tax_map'] is False
+
+
+def finish_example_run(window, tmp_path, table_text):
+    window.output_dir_label.setText(str(tmp_path))
+    window.db_label.setText(str(OtuUtils.EXAMPLE_DATABASE))
+    (tmp_path / f"OTU_Table_{tmp_path.name}_unite_subset.tsv").write_text(table_text)
+    window._example_run = True
+    window.set_running_state(True)
+    window.pipeline_finished(True, None)
+
+
+def test_matching_example_result_is_announced(window, dialogs, tmp_path):
+    finish_example_run(window, tmp_path, OtuUtils.EXAMPLE_EXPECTED_TABLE.read_text())
+    assert ('information', True) in [(kind, 'installation works' in text) for kind, text in dialogs]
+    assert window._example_run is False
+
+
+def test_differing_example_result_is_announced(window, dialogs, tmp_path):
+    lines = OtuUtils.EXAMPLE_EXPECTED_TABLE.read_text().splitlines()
+    finish_example_run(window, tmp_path, '\n'.join(lines[:-1]) + '\n')
+    assert ('warning', True) in [(kind, 'differs' in text) for kind, text in dialogs]

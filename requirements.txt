@@ -1,5 +1,5 @@
 # LOREON Metagenomic Pipeline Requirements
-# Python 3.8+
+# Python 3.9+
 
 # Core dependencies
 biopython>=1.79

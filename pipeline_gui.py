@@ -36,15 +36,25 @@ if getattr(sys, 'frozen', False):
             f"{_internal_str};{os.environ.get('PATH', '')}"
         )
 
-from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
-    QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
-    QFileDialog, QSpinBox, QDoubleSpinBox, QDialog, QDialogButtonBox,
-    QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy, QTextBrowser
+from venv_manager import (
+    display_problem, environment_problems, pyqt_import_problem, qt_library_problem
 )
-from PyQt5.QtCore import QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop, QSize
-from PyQt5.QtGui import QDesktopServices, QIcon, QPixmap
+
+try:
+    from PyQt5.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QGridLayout, QGroupBox, QLabel, QLineEdit, QPushButton,
+        QComboBox, QCheckBox, QPlainTextEdit, QProgressBar, QMessageBox,
+        QFileDialog, QSpinBox, QDoubleSpinBox, QDialog, QDialogButtonBox,
+        QSystemTrayIcon, QMenu, QSplashScreen, QSizePolicy, QTextBrowser
+    )
+    from PyQt5.QtCore import (
+        QLibraryInfo, QThread, QUrl, pyqtSignal, QProcess, Qt, QTimer, QEventLoop, QSize
+    )
+    from PyQt5.QtGui import QDesktopServices, QIcon, QPixmap
+except ImportError as import_error:
+    print(pyqt_import_problem(import_error), file=sys.stderr)
+    sys.exit(1)
 
 
 def _get_base_dir():
@@ -62,19 +72,24 @@ def _load_icon():
     return QIcon()
 
 try:
-    from pipeline_worker import PipelineWorker, DOCKER_IMAGE
+    from pipeline_worker import PipelineWorker, DOCKER_IMAGE, otu_table_stem
 except ImportError:
     print("ERROR: Cannot find 'pipeline_worker.py'.")
     sys.exit(1)
 
 try:
     from OtuUtils import (
-        LENGTH_PRESETS, LENGTH_PRESET_LABELS, format_length_report,
-        sample_read_lengths, suggest_length_window, summarize_lengths
+        EXAMPLE_DATABASE, EXAMPLE_DIR, EXAMPLE_EXPECTED_TABLE, EXAMPLE_READS,
+        LENGTH_PRESETS, LENGTH_PRESET_LABELS, LOREON_VERSION, compare_otu_tables,
+        format_length_report, sample_read_lengths, suggest_length_window, summarize_lengths
     )
 except ImportError:
     print("ERROR: Cannot find 'OtuUtils.py'.")
     sys.exit(1)
+
+def default_example_output_dir():
+    """Folder that receives the results of the example dataset."""
+    return Path.home() / 'LOREON_example_output'
 
 
 class DockerBuildDialog(QDialog):
@@ -222,17 +237,19 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("LOREON Metagenomic Pipeline GUI v1.0")
+        self.setWindowTitle(f"LOREON Metagenomic Pipeline GUI v{LOREON_VERSION}")
         self.setGeometry(100, 100, 900, 750)
         self.is_running = False
         self._log_file = None
         self._run_warning = None
         self._applying_preset = False
+        self._example_run = False
         icon = _load_icon()
         self.setWindowIcon(icon)
         self.init_ui()
         self.setup_worker_thread()
         self._setup_tray(icon)
+        self._report_environment()
 
     def init_ui(self):
         outer_layout = QVBoxLayout()
@@ -254,7 +271,9 @@ class MainWindow(QMainWindow):
         path_layout = QGridLayout()
         self.input_dir_btn = QPushButton("Select Input folder...")
         self.input_dir_label = QLineEdit()
-        self.input_dir_label.setPlaceholderText("e.g., /path/to/raw/data (barcodeXX, unclassified)")
+        self.input_dir_label.setPlaceholderText(
+            "e.g., /path/to/raw/data (one sub-folder or one FASTQ file per sample)"
+        )
         self.db_btn = QPushButton("Ref DB FASTA...")
         self.db_label = QLineEdit()
         self.db_label.setPlaceholderText("e.g., /path/to/unite.fasta")
@@ -297,7 +316,7 @@ class MainWindow(QMainWindow):
         options_left_layout.addWidget(self.profile_check)
         self.delete_bam_check = QCheckBox("Delete BAM/SAM after analysis")
         self.delete_bam_check.setToolTip(
-            "Delete intermediate BAM and SAM files after tabeling\n"
+            "Delete intermediate BAM and SAM files after tabulation\n"
             "to free disk space. The OTU results are NOT affected."
         )
         options_left_layout.addWidget(self.delete_bam_check)
@@ -469,12 +488,21 @@ class MainWindow(QMainWindow):
         self.run_btn = QPushButton("START PIPELINE")
         self.run_btn.setStyleSheet(
             "font-size: 18px; background-color: #2ca02c; color: white; font-weight: bold; padding: 10px;")
+        self.example_btn = QPushButton("RUN EXAMPLE DATASET")
+        self.example_btn.setStyleSheet(
+            "font-size: 14px; background-color: #1f77b4; color: white; font-weight: bold; padding: 10px;")
+        self.example_btn.setToolTip(
+            "Analyse the small dataset shipped with LOREON (three samples of 500 reads)\n"
+            "with the default settings and compare the result with the expected table.\n"
+            "Use it to check that the installation works."
+        )
         self.stop_btn = QPushButton("STOP")
         self.stop_btn.setStyleSheet(
             "font-size: 18px; background-color: #d62728; color: white; font-weight: bold; padding: 10px;")
         self.stop_btn.setEnabled(False)
-        button_layout.addWidget(self.run_btn)
-        button_layout.addWidget(self.stop_btn)
+        button_layout.addWidget(self.run_btn, 3)
+        button_layout.addWidget(self.example_btn, 2)
+        button_layout.addWidget(self.stop_btn, 3)
         main_layout.addLayout(button_layout)
 
         log_group = QGroupBox("Execution Log")
@@ -501,6 +529,7 @@ class MainWindow(QMainWindow):
         self.max_len_input.valueChanged.connect(self._on_length_value_edited)
         self.scan_lengths_btn.clicked.connect(self.scan_read_lengths)
         self.run_btn.clicked.connect(self.run_pipeline)
+        self.example_btn.clicked.connect(self.run_example)
         self.stop_btn.clicked.connect(self.stop_pipeline)
 
         central_widget = QWidget()
@@ -674,12 +703,76 @@ class MainWindow(QMainWindow):
         self.check_docker_image()
 
 
+    def run_example(self):
+        """Fill the form with the example dataset and the default settings, then start."""
+        if self.is_running:
+            return
+        if not (EXAMPLE_READS.is_dir() and EXAMPLE_DATABASE.is_file()
+                and EXAMPLE_EXPECTED_TABLE.is_file()):
+            QMessageBox.warning(self, "Example dataset not found",
+                                f"The example dataset was not found in:\n{EXAMPLE_DIR}")
+            return
+        output_dir = default_example_output_dir()
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            QMessageBox.critical(self, "Example dataset",
+                                 f"The output folder cannot be created:\n{output_dir}\n{e}")
+            return
+        self.input_dir_label.setText(str(EXAMPLE_READS))
+        self.db_label.setText(str(EXAMPLE_DATABASE))
+        self.output_dir_label.setText(str(output_dir))
+        self.format_combo.setCurrentText('unite')
+        self.length_mode_combo.setCurrentIndex(0)
+        self.min_identity_input.setValue(0.0)
+        self.min_ref_cov_input.setValue(0.0)
+        self.kmer_input.setValue(15)
+        self.window_input.setValue(10)
+        self.flat_sh_check.setChecked(False)
+        self._example_run = True
+        self.run_pipeline()
+        if not self.is_running:
+            self._example_run = False
+
+    def _example_verdict(self):
+        """Compare the table of an example run with the expected one: (matches, text)."""
+        output_dir = Path(self.output_dir_label.text())
+        stem = otu_table_stem(output_dir, self.db_label.text(), self.docker_check.isChecked())
+        table = output_dir / f"{stem}.tsv"
+        if not table.exists():
+            differences = [f"no OTU table was written ({table.name})"]
+        else:
+            try:
+                differences = compare_otu_tables(EXAMPLE_EXPECTED_TABLE, table)
+            except (OSError, ValueError, IndexError) as e:
+                differences = [f"the tables could not be compared ({e})"]
+        if not differences:
+            return True, ("The result of the example dataset matches the expected table.\n"
+                          "The installation works.")
+        return False, ("The result of the example dataset differs from the expected table:\n\n"
+                       + "\n".join(differences)
+                       + "\n\nDifferent versions of minimap2 can assign a few reads differently;\n"
+                         "the versions used are listed at the top of the log.")
+
+    def _report_environment(self):
+        """Write to the log what is missing to run an analysis on this computer."""
+        problems = environment_problems(self.docker_check.isChecked())
+        for problem in problems:
+            self.append_log(f"[CHECK] {problem}")
+        if not problems:
+            self.append_log("[CHECK] All components needed to run an analysis were found.")
+
     def run_pipeline(self):
         if self.is_running:
             QMessageBox.warning(self, "Warning", "Pipeline is already running.")
             return
 
         use_docker = self.docker_check.isChecked()
+        problems = environment_problems(use_docker)
+        if problems and not (use_docker or sys.platform == 'win32'):
+            QMessageBox.critical(self, "Missing components",
+                                 "The analysis cannot start:\n\n" + "\n\n".join(problems))
+            return
         if sys.platform == 'win32' and not use_docker:
             QMessageBox.critical(self, "Docker required",
                                  "Docker must be enabled on Windows, please enable it.")
@@ -705,6 +798,8 @@ class MainWindow(QMainWindow):
             self.append_log(f"[INFO] Docker mode: pipeline will run inside '{DOCKER_IMAGE}'")
 
         settings = self.collect_settings()
+        if self._example_run:
+            settings["force_tax_map"] = True
         if not all([settings["input_dir"], settings["output_dir"], settings["db_path"]]):
             QMessageBox.critical(self, "Error", "Input, Output and Database paths are mandatory.")
             self.append_log("--- ERROR: Missing paths. Pipeline aborted. ---")
@@ -725,6 +820,13 @@ class MainWindow(QMainWindow):
 
     def pipeline_finished(self, success, html_report_path):
         self.append_log("--- PIPELINE FINISHED ---")
+        example_run, self._example_run = self._example_run, False
+        example_verdict = None
+        if success and example_run:
+            example_verdict = self._example_verdict()
+            for line in example_verdict[1].splitlines():
+                if line.strip():
+                    self.append_log(f"[EXAMPLE] {line}")
 
         if self._log_file and not self._log_file.closed:
             try:
@@ -756,6 +858,11 @@ class MainWindow(QMainWindow):
                     "The log reports the cause next to each failed sample."
                 )
                 self._run_warning = None
+            if example_verdict is not None:
+                if example_verdict[0]:
+                    QMessageBox.information(self, "Example dataset", example_verdict[1])
+                else:
+                    QMessageBox.warning(self, "Example dataset", example_verdict[1])
         else:
             if "Stopping" in self.status_bar.format():
                 self.status_bar.setFormat("Process stopped by user.")
@@ -781,7 +888,7 @@ class MainWindow(QMainWindow):
                        self.sample_timeout_input,
                        self.force_tax_map_check, self.profile_check,
                        self.delete_bam_check, self.flat_sh_check, self.docker_check,
-                       self.docker_check_btn, self.docker_build_btn]:
+                       self.docker_check_btn, self.docker_build_btn, self.example_btn]:
             widget.setEnabled(not is_running)
         if not is_running:
             self._on_length_mode_changed()
@@ -864,13 +971,29 @@ def _ensure_venv(app):
         QMessageBox.critical(
             None, "LOREON Setup Error",
             f"Failed to set up the Python environment:\n\n{e}\n\n"
-            "Make sure Python 3.8+ is installed and available in PATH."
+            "Make sure Python 3.9+ is installed and available in PATH."
         )
         return False
 
 
+def startup_problem():
+    """Reason why the window cannot be opened on this computer, or None."""
+    if not sys.platform.startswith('linux') or getattr(sys, 'frozen', False):
+        return None
+    problem = display_problem()
+    if problem:
+        return problem
+    if os.environ.get('QT_QPA_PLATFORM', 'xcb') == 'xcb':
+        return qt_library_problem(QLibraryInfo.location(QLibraryInfo.PluginsPath))
+    return None
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    blocking_problem = startup_problem()
+    if blocking_problem:
+        print(blocking_problem, file=sys.stderr)
+        sys.exit(1)
     app = QApplication(sys.argv)
 
     icon = _load_icon()

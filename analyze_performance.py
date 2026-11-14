@@ -242,7 +242,7 @@ def build_report(records, sys_info, output_path):
             'step1_taxonomy_time_s': 'Taxonomy Parsing',
             'step2_filter_time_s': 'Sequence Filter',
             'step3_filter_report_time_s': 'Filter Report',
-            'step4_mapping_time_s': 'Mapping & Tabeling',
+            'step4_mapping_time_s': 'Mapping & Tabulation',
             'step5_reformat_time_s': 'Index Reformat',
             'step6_otu_aggregation_time_s': 'OTU Aggregation',
         }

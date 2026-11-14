@@ -1,3 +1,4 @@
+import csv
 import statistics
 import random
 import re
@@ -15,6 +16,128 @@ try:
     from isal import igzip as gzip
 except ImportError:
     import gzip
+
+LOREON_VERSION = "1.1.0"
+
+
+def _application_dir():
+    if getattr(sys, 'frozen', False):
+        return Path(sys.executable).parent
+    return Path(__file__).resolve().parent
+
+
+EXAMPLE_DIR = _application_dir() / 'example_data'
+EXAMPLE_READS = EXAMPLE_DIR / 'reads'
+EXAMPLE_DATABASE = EXAMPLE_DIR / 'database' / 'unite_subset.fasta'
+EXAMPLE_EXPECTED_TABLE = EXAMPLE_DIR / 'expected' / 'OTU_Table_expected.tsv'
+_TABLE_DESCRIPTION_COLUMNS = ('Taxonomy', 'Kingdom', 'Phylum', 'Class', 'Order', 'Family',
+                              'Genus', 'Species', 'Details')
+
+
+def _read_count_table(path):
+    """Read an OTU table written by LOREON as {OTU: {sample: count}} plus the sample names."""
+    with open(path, newline='', encoding='utf-8') as handle:
+        rows = [row for row in csv.reader(handle, delimiter='\t') if row]
+    header = rows[0]
+    first_sample = 1
+    while (first_sample < len(header) and header[first_sample] in _TABLE_DESCRIPTION_COLUMNS
+           and header[first_sample] not in header[1:first_sample]):
+        first_sample += 1
+    positions = {name: index for index, name in enumerate(header) if index >= first_sample}
+    table = {}
+    for row in rows[1:]:
+        table[row[0]] = {
+            name: int(float(row[index])) if index < len(row) and row[index] != '' else 0
+            for name, index in positions.items()
+        }
+    return list(positions), table
+
+
+def compare_otu_tables(expected_path, observed_path, max_lines=10):
+    """Differences in the read counts of two OTU tables written by LOREON.
+
+    Rows are matched by OTU identifier and columns by sample name, in any
+    order. Returns lines of text, at most max_lines plus a closing line that
+    counts the rest; the list is empty when the counts agree.
+    """
+    expected_samples, expected = _read_count_table(expected_path)
+    observed_samples, observed = _read_count_table(observed_path)
+    differences = []
+    for sample in expected_samples:
+        if sample not in observed_samples:
+            differences.append(f"sample {sample} is missing")
+    for sample in observed_samples:
+        if sample not in expected_samples:
+            differences.append(f"sample {sample} was not expected")
+    shared = [sample for sample in expected_samples if sample in observed_samples]
+    for otu in sorted(set(expected) | set(observed)):
+        if otu not in observed:
+            if any(expected[otu][sample] for sample in shared):
+                differences.append(f"{otu} is missing ({sum(expected[otu][s] for s in shared)} reads expected)")
+            continue
+        if otu not in expected:
+            if any(observed[otu][sample] for sample in shared):
+                differences.append(f"{otu} was not expected ({sum(observed[otu][s] for s in shared)} reads)")
+            continue
+        for sample in shared:
+            if expected[otu][sample] != observed[otu][sample]:
+                differences.append(f"{otu}, sample {sample}: expected {expected[otu][sample]}, "
+                                   f"found {observed[otu][sample]}")
+    if len(differences) > max_lines:
+        hidden = len(differences) - max_lines
+        differences = differences[:max_lines] + [f"... and {hidden} more differences"]
+    return differences
+
+_READ_FILE_PATTERNS = ('*.f*q.gz', '*.f*q')
+
+
+def sample_name_of(source):
+    """Sample name of an input source: the folder name, or the FASTQ file name without extensions."""
+    name = source.name
+    if source.is_dir():
+        return name
+    for suffix in ('.gz', '.fastq', '.fq'):
+        if name.lower().endswith(suffix):
+            name = name[: -len(suffix)]
+    return name
+
+
+def _read_files_in(folder, recursive=False):
+    prefix = '**/' if recursive else ''
+    return sorted({
+        f for pattern in _READ_FILE_PATTERNS for f in folder.glob(prefix + pattern)
+        if f.is_file() and not f.name.startswith('.')
+    })
+
+
+def find_input_samples(input_dir):
+    """Find the samples of an input folder.
+
+    Two layouts are accepted: one sub-folder per sample, whose FASTQ files
+    are merged, or FASTQ files placed directly in the folder, one file per
+    sample. Sub-folders that hold FASTQ files take precedence; FASTQ files
+    placed next to them are returned as ignored.
+    """
+    input_dir = Path(input_dir)
+    folders = sorted(
+        d for d in input_dir.iterdir()
+        if d.is_dir() and not d.name.startswith('.') and _read_files_in(d, recursive=True)
+    )
+    files = _read_files_in(input_dir)
+    if folders:
+        return {'layout': 'folders', 'sources': folders, 'ignored': files}
+    return {'layout': 'files', 'sources': files, 'ignored': []}
+
+
+INPUT_LAYOUT_HELP = (
+    "  LOREON accepts two layouts of the input folder:",
+    "    1. one sub-folder per sample, each holding the FASTQ files of that sample, e.g.",
+    "         input/barcode01/reads_001.fastq.gz",
+    "         input/barcode02/reads_001.fastq.gz",
+    "    2. one FASTQ file per sample placed directly in the folder, e.g.",
+    "         input/SRR20631366.fastq",
+    "         input/SRR20631367.fastq.gz",
+)
 
 
 def _iter_fastq_raw(handle):
@@ -312,13 +435,16 @@ def filter_and_merge_directory(
     debug: bool = False,
     gzip_intermediate: bool = False
 ):
-    dir_name = input_dir.name
+    dir_name = sample_name_of(input_dir)
 
     if max_len <= 0:
         max_len = 999_999_999
 
-    file_list = list(input_dir.glob('**/*.f*q.gz')) + \
-                list(input_dir.glob('**/*.f*q'))
+    if input_dir.is_file():
+        file_list = [input_dir]
+    else:
+        file_list = list(input_dir.glob('**/*.f*q.gz')) + \
+                    list(input_dir.glob('**/*.f*q'))
 
     file_list = [f for f in file_list if not f.name.startswith('._')]
 
@@ -831,7 +957,7 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
         thread_str = str(threads)
 
         if debug:
-            print(f"--- [Tabeling: {fname}] with {thread_str} threads ---", flush=True)
+            print(f"--- [Tabulation: {fname}] with {thread_str} threads ---", flush=True)
 
     except Exception as e:
         print(f"[{fname}] Error in path setup: {e}")
@@ -994,7 +1120,7 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
 
         if debug:
             print(f"[{fname}] Post-filter: mapped={total_mapped_filtered}", flush=True)
-            print(f"--- [Tabeling: {fname}] Complete ---", flush=True)
+            print(f"--- [Tabulation: {fname}] Complete ---", flush=True)
 
         completed = True
         return mapping_stats

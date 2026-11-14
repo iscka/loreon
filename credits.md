@@ -6,7 +6,7 @@ A comprehensive bioinformatics pipeline for processing Oxford Nanopore Technolog
 
 ## License
 
-GNU AFFERO GENERAL PUBLIC LICENSE — see the `LICENSE` file included in the distribution.
+GNU General Public License v3.0 (GPL-3.0-only) — see the `LICENSE` file included in the distribution.
 
 ---
 
@@ -46,4 +46,5 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 
 | Version | Highlights |
 |---------|-----------|
+| v1.1 | Working default settings, input folders with one file per sample, example dataset, identity and coverage filter independent of the samtools version, explicit failure reports, conda environment |
 | v1.0 | First public release: length filtering with amplicon presets, minimap2 mapping, samtools alignment-quality filters, DuckDB OTU aggregation, interactive HTML report, PyQt5 GUI, Windows Docker mode, performance profiling |

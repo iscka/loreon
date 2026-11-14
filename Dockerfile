@@ -69,6 +69,7 @@ COPY metaGenomics_new.py \
      pipeline_profiler.py \
      template.html \
      ./
+COPY example_data ./example_data
 
 RUN mkdir -p /data/input /data/output /data/db
 

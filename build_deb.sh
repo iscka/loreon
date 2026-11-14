@@ -42,7 +42,7 @@ cd "$(dirname "$0")"
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="loreon"
 APP_NAME_DISPLAY="LOREON"
-APP_VERSION="1.0"
+APP_VERSION="1.1.0"
 ARCH="amd64"
 DEB_NAME="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
 INSTALL_PREFIX="/opt/loreon"
@@ -58,6 +58,7 @@ DATA_FILES=(
     loreon_app_icon_2.png
     loreon.jpeg
     credits.md
+    LICENSE
     metaGenomics_new.py
     OtuUtils.py
     ResultsReader.py
@@ -141,6 +142,7 @@ for f in "${DATA_FILES[@]}"; do
         warn "File not found, skipping: $f"
     fi
 done
+[ -d example_data ] && cp -R example_data "$PYINST_DIR/"
 [ -f .dockerignore ] && cp .dockerignore "$PYINST_DIR/"
 
 success "Data files copied."
@@ -243,22 +245,28 @@ Source: https://github.com/iscka/loreon
 
 Files: *
 Copyright: $(date +%Y) Roberto Scarponi
-License: MIT
- Permission is hereby granted, free of charge, to any person obtaining
- a copy of this software and associated documentation files (the
- "Software"), to deal in the Software without restriction, including
- without limitation the rights to use, copy, modify, merge, publish,
- distribute, sublicense, and/or sell copies of the Software, and to
- permit persons to whom the Software is furnished to do so, subject to
- the following conditions:
+License: GPL-3
+ This program is free software: you can redistribute it and/or modify
+ it under the terms of the GNU General Public License as published by
+ the Free Software Foundation, version 3 of the License.
  .
- The above copyright notice and this permission notice shall be
- included in all copies or substantial portions of the Software.
+ This program is distributed in the hope that it will be useful,
+ but WITHOUT ANY WARRANTY; without even the implied warranty of
+ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ GNU General Public License for more details.
  .
- THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
- EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+ On Debian systems the full text of the GNU General Public License
+ version 3 can be found in /usr/share/common-licenses/GPL-3.
+
+Files: example_data/database/*
+Copyright: 2025 UNITE Community
+License: CC-BY-4.0
+ Subset of the UNITE general FASTA release for Fungi, version 19.02.2025,
+ https://doi.org/10.15156/BIO/3301229, distributed under the Creative
+ Commons Attribution 4.0 International licence,
+ https://creativecommons.org/licenses/by/4.0/.
 COPYR
+cp LICENSE "$DEB_ROOT/usr/share/doc/loreon/"
 
 # ── DEBIAN control files ────────────────────────────────────────────────────
 mkdir -p "$DEB_ROOT/DEBIAN"
@@ -274,7 +282,7 @@ Section: science
 Priority: optional
 Architecture: ${ARCH}
 Installed-Size: ${INSTALLED_SIZE}
-Depends: python3 (>= 3.8), python3-venv, python3-pip, libxcb-xinerama0, libxcb-cursor0, libgl1, libglib2.0-0, libfontconfig1, libxkbcommon0
+Depends: python3 (>= 3.9), python3-venv, python3-pip, libxcb-xinerama0, libxcb-cursor0, libgl1, libglib2.0-0, libfontconfig1, libxkbcommon0
 Recommends: samtools
 Suggests: minimap2
 Maintainer: ${MAINTAINER}

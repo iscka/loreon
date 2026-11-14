@@ -2,7 +2,9 @@
 
 LOREON is a cross-platform bioinformatics application for processing **Oxford Nanopore Technologies (ONT)** long-read amplicon metagenomic data. It was originally designed for **fungal ITS** barcoding and now also supports **bacterial 16S**, and eukaryotic **18S (SSU)** / **LSU** markers.
 
-The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folders), optionally filters them by length, maps them against a reference database with **minimap2**, counts the primary alignments per reference (optionally filtered by identity and read coverage), aggregates the results into an **OTU table** with **DuckDB**, and produces a self-explanatory **interactive HTML report**. Everything is driven either from a **PyQt5 graphical interface** or from the **command line**, and can run natively on Linux/macOS or inside a **Docker container** on Windows.
+The application takes demultiplexed FASTQ reads (one sub-folder or one file per sample), optionally filters them by length, maps them against a reference database with **minimap2**, counts the primary alignments per reference (optionally filtered by identity and read coverage), aggregates the results into an **OTU table** with **DuckDB**, and produces a self-explanatory **interactive HTML report**. Everything is driven either from a **PyQt5 graphical interface** or from the **command line**, and can run natively on Linux/macOS or inside a **Docker container** on Windows.
+
+> **Name.** LOREON is not related to LoReAn (Long-Read Annotation; Cook et al., 2019, *Plant Physiology* 179:38–54), a pipeline for the annotation of eukaryotic genomes.
 
 ---
 
@@ -13,6 +15,7 @@ The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folder
 - [System Requirements](#system-requirements)
 - [Installation](#installation)
 - [Quick Start](#quick-start)
+- [Example Dataset](#example-dataset)
 - [Graphical Interface (GUI)](#graphical-interface-gui)
 - [Command-Line Reference](#command-line-reference)
 - [Amplicon Presets](#amplicon-presets)
@@ -56,9 +59,9 @@ The application takes demultiplexed FASTQ reads (organised in `barcodeXX` folder
 | Step | Name | What happens |
 |------|------|--------------|
 | **0** | Taxonomy parsing | Reference FASTA headers are parsed into a taxonomy map (`<db>_taxonomy_map.tsv`). The map is cached and reused unless `--force-tax-map` is set. |
-| **1** | Sequence filtering | Every `barcodeXX` / `unclassified` folder is scanned; reads outside the `[min_len, max_len]` window, when one is set, are discarded. Kept reads are merged per barcode into a single FASTQ (optionally gzipped). |
+| **1** | Sequence filtering | Every sample of the input folder (a sub-folder such as `barcodeXX`, or a single FASTQ file) is scanned; reads outside the `[min_len, max_len]` window, when one is set, are discarded. Kept reads are merged per sample into a single FASTQ (optionally gzipped). |
 | **1.5** | Filter report | Per-barcode statistics (good/bad counts, mean & median length) are written to an Excel report. |
-| **2** | Mapping & tabeling | Each merged FASTQ is mapped with minimap2 (`map-ont`), piped into `samtools sort`. The sorted BAM is then read once: primary alignments are counted per reference and, if requested, filtered by identity and read coverage. Pre- and post-filter statistics and a per-sample count table are produced; the alignments that pass are written to a filtered BAM. All figures, with the tool versions, are stored in `mapping_stats.json`. |
+| **2** | Mapping & tabulation | Each merged FASTQ is mapped with minimap2 (`map-ont`), piped into `samtools sort`. The sorted BAM is then read once: primary alignments are counted per reference and, if requested, filtered by identity and read coverage. Pre- and post-filter statistics and a per-sample count table are produced; the alignments that pass are written to a filtered BAM. All figures, with the tool versions, are stored in `mapping_stats.json`. |
 | **3** | Results aggregation | DuckDB pivots and joins all per-sample count tables with taxonomy into one OTU table, with barcodes sorted naturally (`barcode01 … barcode10 … unclassified`). Reference-ID reformatting per database format happens in-query. |
 | **4** | HTML report | An interactive Plotly HTML report is generated from the OTU table, the filter report and `mapping_stats.json`. |
 
@@ -76,14 +79,18 @@ Must be installed and available on `PATH`:
 These are the oldest versions LOREON was tested with; the analyses of the article used minimap2 2.28 and samtools 1.21, which are also the versions built into the Docker image. The versions found on `PATH` are printed at start-up and recorded in `mapping_stats.json`; a run with an older version stops with an explicit message.
 - `awk` / `gawk` (pre-installed on most Unix systems)
 
+### Python
+
+Python **≥ 3.9**.
+
 ### Windows
 
-- [Python](https://www.python.org/downloads/) ≥ 3.8 (for the GUI on the host)
+- [Python](https://www.python.org/downloads/) ≥ 3.9 (for the GUI on the host)
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) with the WSL 2 backend — minimap2, samtools and the pipeline run inside the container, so they do **not** need to be installed on the host.
 
 ### Python dependencies
 
-Installed via `pip install -r requirements.txt`:
+Installed by the conda environment file or via `pip install -r requirements.txt`:
 
 | Package | Purpose |
 |---------|---------|
@@ -100,29 +107,49 @@ Installed via `pip install -r requirements.txt`:
 
 ## Installation
 
+Download or clone the repository, open a terminal in its folder and follow one of the two routes. Then check the result with the [example dataset](#example-dataset).
+
 ### With Conda (recommended for Linux/macOS)
 
 ```bash
-conda create -n loreon python=3.9
+conda env create -f environment.yml
 conda activate loreon
-conda install -c bioconda minimap2=2.28 samtools=1.21
-pip install -r requirements.txt
+python pipeline_gui.py
 ```
+
+`environment.yml` takes everything from the conda-forge and bioconda channels and pins Python 3.11, PyQt 5.15, minimap2 2.28 and samtools 1.21. The environment contains the Qt libraries, so no system package has to be installed: on clean Ubuntu 22.04 and 24.04 the display plugin of Qt finds all its libraries, the whole test suite passes and the interface opens. The commands were tested with [Miniforge](https://github.com/conda-forge/miniforge).
 
 ### With pip / virtualenv
 
 ```bash
+sudo apt install python3-venv      # Ubuntu and Debian: the venv module is a separate package
 python3 -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-# install minimap2 and samtools separately (native mode only)
+python pipeline_gui.py
 ```
 
-The bundled `venv_manager.py` can also create and validate a dedicated virtual environment automatically; the GUI uses it to locate a suitable Python interpreter for the pipeline subprocesses.
+With this route:
+
+- minimap2 and samtools must be installed separately, unless Docker mode is used;
+- PyQt5 is published on PyPI for x86-64 Linux, macOS and Windows; on ARM Linux use the conda route;
+- on Linux PyQt5 uses the display libraries of the system. A desktop installation already has most of them; `libxcb-xinerama0` is the one most often missing on Ubuntu. If some are missing, LOREON does not open the window and prints their names with the `apt` command that installs them. On clean Ubuntu 22.04 and 24.04 that command is enough to open the interface.
+
+### Checks at start-up
+
+`python pipeline_gui.py` explains what is wrong, instead of failing with a Qt error, when PyQt5 is not installed, when system libraries are missing, and when there is no graphical session (for example over `ssh` without display forwarding; use the [command line](#command-line-reference) there). When the window opens, the log lists the components that are missing for an analysis on this computer (minimap2, samtools, Python packages, or Docker in Docker mode) and how to install them; **START PIPELINE** shows the same list instead of starting a run that cannot succeed.
+
+The bundled `venv_manager.py` can also create and validate a dedicated virtual environment automatically; the packaged application uses it to locate a suitable Python interpreter for the pipeline subprocesses.
 
 ---
 
 ## Quick Start
+
+**Check the installation with the example dataset:**
+
+```bash
+python metaGenomics_new.py --example
+```
 
 **GUI (recommended):**
 
@@ -144,6 +171,18 @@ python metaGenomics_new.py \
 
 ---
 
+## Example Dataset
+
+The folder [`example_data`](example_data) holds three samples of 500 reads from yeast mock communities, a subset of the UNITE database and the OTU table expected for them (2.3 MB in all; sources and licences are in its [README](example_data/README.md)).
+
+- Command line: `python metaGenomics_new.py --example` analyses it with the default settings, writes the results to `./loreon_example_output` (or to the folder given with `-o`) and compares the read counts with the expected table. The run takes less than a minute and ends with `The installation works.` and exit status `0`; if the tables differ, the differing cells are listed and the exit status is `1`.
+- Interface: **RUN EXAMPLE DATASET** fills the form, runs the analysis in `LOREON_example_output` in the home folder and shows the outcome of the comparison. It works in Docker mode as well.
+- Docker image: `docker run --rm loreon:latest python3 /app/metaGenomics_new.py --example -o /tmp/example`.
+
+Any analysis can be checked in the same way against a table written by an earlier run: `--expected-table <OTU_Table.tsv>`.
+
+---
+
 ## Graphical Interface (GUI)
 
 Launch with `python pipeline_gui.py`. The window is organised into numbered groups:
@@ -160,7 +199,7 @@ Launch with `python pipeline_gui.py`. The window is organised into numbered grou
    - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default.
 3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs, and optionally a maximum time per sample.
 4. **Docker (required on Windows)** — enable Docker mode, **Check Image** and **Build Image** (first run only).
-5. **START PIPELINE / STOP** — run or terminate the pipeline. In Docker mode **STOP** also stops the container.
+5. **START PIPELINE / RUN EXAMPLE DATASET / STOP** — run the analysis of the form, run the [example dataset](#example-dataset), or terminate the pipeline. In Docker mode **STOP** also stops the container.
 6. **Execution Log** — real-time streaming log with a progress bar.
 
 Additional conveniences: a **splash screen** on launch, a **system-tray icon** with show/quit actions, and an embedded **License & Credits** viewer.
@@ -173,9 +212,11 @@ Additional conveniences: a **splash screen** on launch, a **system-tray icon** w
 
 ### Required
 
+Not needed with `--example`.
+
 | Flag | Description |
 |------|-------------|
-| `-i, --input_dir` | Input directory containing `barcodeXX` folders and `unclassified`. |
+| `-i, --input_dir` | Input directory: one sub-folder per sample, or one FASTQ file per sample (see [Input & Output Layout](#input--output-layout)). |
 | `-o, --output_dir` | Output directory for all results. |
 | `-d, --db_path` | Path to the reference database FASTA. |
 
@@ -230,15 +271,17 @@ Reads that are longer than the reference sequences (for example ITS–LSU amplic
 |------|-------------|
 | `--debug` | Verbose output (shows exact commands and per-step detail). |
 | `--profile` | Enable performance profiling (JSON + Word report). |
-| `--delete-bam` | Delete BAM/SAM files after tabeling to save disk space. |
+| `--delete-bam` | Delete BAM/SAM files after tabulation to save disk space. |
 | `--gzip-intermediate` | Write merged FASTQ intermediates as `.fastq.gz` (minimap2 reads gzip natively). |
+| `--example` | Analyse the [example dataset](#example-dataset) with the default settings and compare the result with its expected table. |
+| `--expected-table TSV` | After the run, compare the read counts of the OTU table with this table (a `.tsv` written by LOREON); exit status `1` if they differ. |
 
 ### Exit status
 
 | Code | Meaning |
 |------|---------|
 | `0` | All samples were processed. |
-| `1` | The run stopped: invalid input, missing or outdated tool, no reads left after the length filter, every sample failed, or the OTU table could not be written. |
+| `1` | The run stopped: invalid input, missing or outdated tool, no reads left after the length filter, every sample failed, the OTU table could not be written, or it differs from the table given with `--expected-table` or `--example`. |
 | `3` | The OTU table was written, but one or more samples failed (unreadable input, mapping or counting error, time limit) and are missing from it. The failed samples and the cause of each failure are listed in the log. |
 
 ---
@@ -277,7 +320,9 @@ The windows are indicative: check them against the read lengths of your own run,
 
 ## Input & Output Layout
 
-**Input:**
+**Input.** Two layouts are accepted.
+
+One sub-folder per sample, as written by the ONT basecallers; all FASTQ files below a sub-folder are merged and the folder name is the sample name:
 
 ```
 input_data/
@@ -290,14 +335,24 @@ input_data/
     └── ...
 ```
 
+One FASTQ file per sample placed directly in the folder, as downloaded from the Sequence Read Archive; the file name without its extensions is the sample name:
+
+```
+input_data/
+├── SRR20631366.fastq
+└── SRR20631367.fastq.gz
+```
+
+Accepted extensions are `.fastq`, `.fq`, `.fastq.gz` and `.fq.gz`. When the folder holds both sub-folders with reads and loose FASTQ files, the sub-folders are used and the loose files are listed in the log as ignored.
+
 **Output:**
 
 ```
 output_folder/
 ├── mapping/                          # minimap2 / sorted BAM intermediates
-├── tabeling/                         # filtered BAM (alignments that were counted) and index, per sample
+├── tabeling/                         # tabulation: filtered BAM (alignments that were counted) and index, per sample
 │   └── results/                      # per-sample count tables (*.tmp.txt)
-├── good_seq/                         # reads kept by the length filter (merged per barcode)
+├── good_seq/                         # reads kept by the length filter (merged per sample)
 ├── bad_seq/                          # reads discarded by the length filter
 ├── report_filtering_<min>_<max>.xlsx # length-filter statistics
 ├── mapping_stats.json                # per-sample mapping & quality-filter stats
@@ -379,7 +434,7 @@ Metrics collected per step include `wall_time_s`, `cpu_time_s`, `mem_mb`, plus s
 
 On Windows, LOREON runs in mixed mode: the GUI is native, while minimap2, samtools and the pipeline run inside a Docker container built from the included `Dockerfile` (Ubuntu 22.04 with minimap2 2.28 and samtools 1.21 compiled from the official source releases, whose checksums are verified during the build, plus the Python pipeline). The first build downloads and compiles the two tools and takes a few minutes.
 
-1. Install Docker Desktop (WSL 2 backend) and Python ≥ 3.8.
+1. Install Docker Desktop (WSL 2 backend) and Python ≥ 3.9.
 2. Launch the GUI (`python pipeline_gui.py` or the installed executable).
 3. In group **3. Docker**, tick **Use Docker** and click **Build Image** (first run only) — this builds the `loreon:latest` image.
 4. Select the input folder, database FASTA and output folder, then click **START PIPELINE**.
@@ -404,11 +459,13 @@ Platform build scripts are included:
 
 The Windows build converts `loreon_app_icon_2.png` to an `.ico`, bundles the pipeline with PyInstaller and copies the Docker context files alongside the executable.
 
+The repository holds no pre-built installers: build them from a tagged version with these scripts, or take them from the release page when a release provides them. All scripts and the application report the same version number, defined once as `LOREON_VERSION` in `OtuUtils.py`.
+
 ---
 
 ## Utilities
 
-**File organizer** — turn a flat folder of barcoded `.gz` files into the per-barcode folder layout LOREON expects:
+**File organizer** — turn a flat folder of barcoded `.gz` files into the per-barcode folder layout. LOREON also reads such a folder directly, one file per sample, so this step is optional:
 
 ```bash
 python fileorganizer.py /path/to/fastq_files
@@ -427,13 +484,15 @@ sample_barcode02.fastq.gz   →   sample_barcode02/sample_barcode02.fastq.gz
 |---------|-----|
 | **`minimap2` not found** | Install it (`conda install -c bioconda minimap2`) or use Docker mode. |
 | **`minimap2`/`samtools` is too old** | LOREON needs minimap2 ≥ 2.24 and samtools ≥ 1.13: `conda install -c bioconda minimap2=2.28 samtools=1.21`, or use Docker mode. |
+| **No FASTQ files found in the input folder** | Use one sub-folder per sample or one FASTQ file per sample; see [Input & Output Layout](#input--output-layout). |
 | **Cannot create taxonomy map** | Check that `-f` matches the database format; ensure write permission; retry with `--force-tax-map`. |
 | **No reads left after the length filter** | The log reports the observed read lengths and suggests a window and the matching presets; set `-min`/`-max` or `--preset` accordingly (GUI: **Scan read lengths...**). |
 | **Zero reads after quality filter** | The identity and read-coverage filters are disabled by default; if you enabled them, lower the thresholds or set them to `0`. Read coverage is low by construction when the reads are longer than the reference sequences. The Mapping QC section shows per-sample retention. |
 | **Step 4 seems stuck** | A progress line (`Step 4 progress: n/N samples completed`) is printed whenever 60 s pass without a sample finishing, so a silent log is not expected. Use `--sample-timeout` (GUI: *Max min/sample*) to stop a sample that exceeds a time limit. |
 | **A tool "was terminated by signal 9"**, or **"a worker process ended unexpectedly"** | The computer or the Docker container ran out of memory: assign more memory to Docker or use fewer parallel jobs (`-T`/`-t`). |
 | **"n of N samples failed"** | The other samples are in the OTU table (exit status `3`); the log shows the failing tool, its exit status and the last lines of its error output next to each failed sample. |
-| **Missing Python module** | `pip install -r requirements.txt`. |
+| **Missing Python module** | `pip install -r requirements.txt`, or use the conda environment. |
+| **The window does not open on Linux** | The terminal shows the reason: PyQt5 not installed, system libraries missing (with the `apt` command that installs them) or no graphical session. See [Installation](#installation). |
 | **GUI crashes on macOS** | `pip install PyQt5`; you may also need `brew install python-tk`. |
 
 Enable `--debug` for exact commands, processed paths and detailed per-step output.
@@ -447,7 +506,7 @@ Enable `--debug` for exact commands, processed paths and detailed per-step outpu
 | `pipeline_gui.py` | PyQt5 graphical interface (entry point). |
 | `pipeline_worker.py` | Background thread that runs the pipeline / report as subprocesses (native or Docker). |
 | `metaGenomics_new.py` | Core pipeline orchestrator and CLI. |
-| `OtuUtils.py` | Filtering, mapping and tabeling utilities. |
+| `OtuUtils.py` | Filtering, mapping and tabulation utilities. |
 | `ResultsReader.py` | DuckDB-based OTU aggregation. |
 | `report_generator.py` | Interactive HTML report generator (uses `template.html`). |
 | `pipeline_profiler.py` | Per-step performance profiling. |
@@ -457,6 +516,9 @@ Enable `--debug` for exact commands, processed paths and detailed per-step outpu
 | `Dockerfile` | Container image for the containerised pipeline. |
 | `template.html` | Jinja2 template for the HTML report. |
 | `requirements.txt` | Python dependencies. |
+| `environment.yml` | Conda environment with pinned Python, PyQt, minimap2 and samtools. |
+| `example_data/` | Example dataset with its expected OTU table. |
+| `CHANGELOG.md` | Changes between versions. |
 | `tests/` | Automated tests (`pytest`). |
 
 ### Running the tests
@@ -474,13 +536,13 @@ The tests build a small synthetic dataset on the fly. Those that need minimap2 a
 
 If you use LOREON in your research, please cite:
 
-> Scarponi, R. (2026). *LOREON: Long-Read ONT Metagenomic Pipeline* (v1.0.0). Zenodo. https://doi.org/10.5281/zenodo.22754395
+> Scarponi, R. (2026). *LOREON: Long-Read ONT Metagenomic Pipeline* (v1.1.0). Zenodo. https://doi.org/10.5281/zenodo.22754395
 
 ```bibtex
 @software{scarponi_loreon_2026,
   author    = {Scarponi, Roberto},
   title     = {{LOREON}: Long-Read {ONT} Metagenomic Pipeline},
-  version   = {1.0.0},
+  version   = {1.1.0},
   year      = {2026},
   publisher = {Zenodo},
   doi       = {10.5281/zenodo.22754395},
@@ -494,7 +556,7 @@ A `CITATION.cff` file is included for automated citation tools (Zenodo, GitHub).
 
 ## License
 
-LOREON is released under the **GNU Affero General Public License** — see the [`LICENSE`](LICENSE) file.
+LOREON is released under the **GNU General Public License v3.0** (GPL-3.0-only), the licence of the PyQt5 toolkit used by its interface — see the [`LICENSE`](LICENSE) file.
 
 ---
 

@@ -19,6 +19,8 @@ wheels/
 .installed.cfg
 *.egg
 dist*/
+windows_setup/
+installer_output/
 # Virtual environments
 venv/
 ENV/
@@ -70,3 +72,8 @@ LOREON.spec
 EPI2ME_issue_export/launch.json
 /EPI2ME_issue_export
 *.md
+!CHANGELOG.md
+
+# Example dataset (kept in the repository)
+!example_data/**
+example_data/**/*_taxonomy_map.tsv

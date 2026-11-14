@@ -92,7 +92,7 @@ if not exist "loreon_app_icon_2.ico" (
 )
 
 REM ── Directory di output ─────────────────────────────────────
-if not exist "installer_output" mkdir windows_setup
+if not exist "windows_setup" mkdir windows_setup
 
 REM ── Compilazione ────────────────────────────────────────────
 echo Compilazione installer in corso...
@@ -108,7 +108,7 @@ if %ERRORLEVEL% neq 0 (
 
 echo.
 echo ============================================================
-echo  Installer creato: installer_output\LOREON_Setup_1.0.exe
+echo  Installer creato nella cartella windows_setup
 echo ============================================================
 echo.
 pause

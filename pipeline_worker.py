@@ -18,6 +18,12 @@ _STEP4_PROGRESS = re.compile(r'Step 4 progress: (\d+)/(\d+) samples completed')
 _SAMPLES_FAILED = re.compile(r'(\d+ of \d+ samples failed)')
 
 
+def otu_table_stem(output_dir, db_path, use_docker):
+    """Name, without extension, of the OTU table that a run writes to its output folder."""
+    analysis_name = "output" if use_docker else Path(output_dir).name
+    return f"OTU_Table_{analysis_name}_{Path(db_path).stem}"
+
+
 def _app_root() -> Path:
     """Return the application root directory.
 
@@ -137,16 +143,14 @@ class PipelineWorker(QObject):
 
     def _report_names(self):
         output_dir = Path(self.settings["output_dir"])
-        if self.settings.get("use_docker", False):
-            analysis_name = "output"
-        else:
-            analysis_name = output_dir.name
+        use_docker = self.settings.get("use_docker", False)
+        analysis_name = "output" if use_docker else output_dir.name
         db_name = Path(self.settings["db_path"]).stem
         min_len = 0 if not self.settings["enable_filter"] else self.settings["min_len"]
         max_len = 999999 if not self.settings["enable_filter"] else self.settings["max_len"]
         return {
             "filter_report": f"report_filtering_{min_len}_{max_len}.tsv",
-            "otu_table": f"OTU_Table_{analysis_name}_{db_name}.xlsx",
+            "otu_table": otu_table_stem(output_dir, self.settings["db_path"], use_docker) + ".xlsx",
             "html_report": f"Report_{analysis_name}_{db_name}.html",
             "mapping_stats": "mapping_stats.json",
             "project_title": f"Report: {analysis_name} (DB: {db_name})",
@@ -291,14 +295,14 @@ class PipelineWorker(QObject):
         elif "STEP 3:" in line:
             self.progress_signal.emit(40, "Step 3: Filter Report...")
         elif "STEP 4:" in line:
-            self.progress_signal.emit(50, "Step 4: Mapping/Tabeling...")
+            self.progress_signal.emit(50, "Step 4: Mapping/Tabulation...")
         elif "Step 4 progress:" in line:
             match = _STEP4_PROGRESS.search(line)
             if match and int(match.group(2)) > 0:
                 done, total = int(match.group(1)), int(match.group(2))
                 self.progress_signal.emit(
                     50 + int(35 * done / total),
-                    f"Step 4: Mapping/Tabeling... {done}/{total} samples"
+                    f"Step 4: Mapping/Tabulation... {done}/{total} samples"
                 )
         elif "samples failed" in line:
             match = _SAMPLES_FAILED.search(line)

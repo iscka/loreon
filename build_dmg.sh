@@ -32,7 +32,7 @@ cd "$(dirname "$0")"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="LOREON"
-APP_VERSION="1.0"
+APP_VERSION="1.1.0"
 BUNDLE_ID="com.loreon.pipeline"
 DMG_NAME="${APP_NAME}-${APP_VERSION}-macOS.dmg"
 DMG_VOLNAME="${APP_NAME} ${APP_VERSION}"
@@ -44,6 +44,7 @@ DATA_FILES=(
     loreon_app_icon_2.png
     loreon.jpeg
     credits.md
+    LICENSE
     metaGenomics_new.py
     OtuUtils.py
     ResultsReader.py
@@ -151,6 +152,7 @@ for f in "${DATA_FILES[@]}"; do
         warn "File not found, skipping: $f"
     fi
 done
+[ -d example_data ] && cp -R example_data "$BUNDLE_DIR/"
 [ -f .dockerignore ] && cp .dockerignore "$BUNDLE_DIR/"
 
 success "Data files copied."
@@ -175,7 +177,7 @@ LOREON - Long-Read ONT Metagenomic Pipeline
 ============================================
 
 PREREQUISITES:
-  Python 3.8+ must be installed on your system.
+  Python 3.9+ must be installed on your system.
   Install via: https://www.python.org/downloads/
   Or via Homebrew: brew install python@3
 
