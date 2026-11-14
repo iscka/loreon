@@ -77,3 +77,5 @@ EPI2ME_issue_export/launch.json
 # Example dataset (kept in the repository)
 !example_data/**
 example_data/**/*_taxonomy_map.tsv
+.claude/worktrees/keen-boyd/
+.claude/worktrees/magical-wescoff/
