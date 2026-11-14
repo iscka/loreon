@@ -375,6 +375,8 @@ A single self-contained HTML file with the following sections:
 2. **Filter QC** — good vs. bad read counts and mean/median length per barcode.
 3. **Metagenomic analysis** — taxonomic composition at Family / Genus / Species level (interactive tabs), a log-normalised heatmap of the top OTUs, and a full searchable OTU table.
 
+The report closes with a note on the reference database: each read is assigned to the reference of its best alignment, with no fallback to a higher taxonomic rank, so the reads of taxa absent from the database are attributed to the closest reference available and a high mapping rate is not evidence that the database is complete.
+
 ---
 
 ## Standalone Report Generator

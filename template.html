@@ -295,6 +295,15 @@
         </div>
         {% endif %}
 
+        <p style="font-size: 9pt; font-weight: bold;">
+            These results depend on the reference database. LOREON assigns each read to the reference
+            of its best alignment and does not fall back to a higher taxonomic rank: taxa absent from
+            the database cannot be identified, and their reads are attributed to the closest reference
+            available. A high mapping rate is therefore not evidence that the database is complete.
+            Reads are left unassigned when they do not align, or when their alignment falls below the
+            minimum identity and coverage thresholds, if set.
+        </p>
+
     </div> <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
     <script src="https://cdn.datatables.net/2.0.8/js/dataTables.min.js"></script>
     <script src="https://cdn.datatables.net/2.0.8/js/dataTables.bootstrap5.min.js"></script>

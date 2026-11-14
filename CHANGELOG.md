@@ -17,6 +17,7 @@ Changes made in response to the review of the manuscript.
 - Identity and read coverage are computed from the CIGAR string and the `NM` tag of each alignment instead of a samtools filter expression, which samtools 1.13 rejected. Counts are unchanged where the expression was accepted.
 - Per-sample counts left in the output folder by an earlier run no longer enter the OTU table.
 - With the default settings the OTU tables are identical to those of version 1.0.0 run without filters.
+- The HTML report closes with a note on the reference database: reads of taxa absent from the database are attributed to the closest reference available, so a high mapping rate is not evidence that the database is complete.
 
 ### Failures and interruption
 
