@@ -49,7 +49,7 @@ The application takes demultiplexed FASTQ reads (one sub-folder or one file per 
 - **Cross-platform GUI** — PyQt5 interface with splash screen, system-tray icon, live execution log, progress bar, hardware-aware thread hints and an embedded license/credits viewer.
 - **Windows Docker mode** — the GUI runs natively on the host while minimap2, samtools and the pipeline execute inside a reproducible Ubuntu container with pinned tool versions (minimap2 2.28, samtools 1.21).
 - **Explicit failures** — the exit status of every external tool is checked; a failing sample is reported with the last lines of the tool's error output, progress is printed periodically during mapping, and an optional time limit per sample stops a stuck job.
-- **Performance profiling** — optional per-step metrics (wall time, CPU time, memory, throughput) exported to JSON and to a formatted Word document.
+- **Performance profiling** — optional per-step metrics (wall time, CPU time, memory, throughput) exported to JSON and to an HTML report.
 - **Disk-space controls** — optional deletion of intermediate BAM/SAM files and gzip compression of merged FASTQ intermediates.
 
 ---
@@ -106,6 +106,8 @@ Installed by the conda environment file or via `pip install -r requirements.txt`
 ---
 
 ## Installation
+
+Pre-built installers for Windows, macOS and Linux are attached to each release: the page [`installers/`](installers/README.md) lists them, with their checksums and the steps to install them. The two routes below install LOREON from the source code.
 
 Download or clone the repository, open a terminal in its folder and follow one of the two routes. Then check the result with the [example dataset](#example-dataset).
 
@@ -193,9 +195,9 @@ Launch with `python pipeline_gui.py`. The window is organised into numbered grou
    - **Debug Mode** — verbose logging.
    - **Open HTML report when done** — auto-opens the report on completion.
    - **Force Taxonomy Map Recreation** — ignores the cached taxonomy map.
-   - **Enable Performance Profiling** — writes the profiling report.
-   - **Delete BAM/SAM after analysis** — frees disk space.
-   - **Retain unmapped reads** — saves the reads that are not counted, one FASTQ file per sample (see [Reads that are not counted](#reads-that-are-not-counted)).
+   - **Enable Performance Profiling** — writes the [performance report](#performance-profiling) and opens it when the analysis ends. Ticked by default.
+   - **Delete BAM/SAM after analysis** — frees disk space. Ticked by default.
+   - **Retain unmapped reads** — saves the reads that are not counted, one FASTQ file per sample (see [Reads that are not counted](#reads-that-are-not-counted)). Ticked by default.
    - **Flat SH (UNITE only)** — collapses reference accessions sharing the same UNITE Species Hypothesis.
    - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default: read the caution in [Alignment-quality filters](#alignment-quality-filters) before setting them.
 3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs, and optionally a maximum time per sample.
@@ -290,7 +292,7 @@ A pure culture or a mock community is the right control. Analyse it with the can
 | Flag | Description |
 |------|-------------|
 | `--debug` | Verbose output (shows exact commands and per-step detail). |
-| `--profile` | Enable performance profiling (JSON + Word report). |
+| `--profile` | Enable performance profiling (JSON + HTML report). |
 | `--delete-bam` | Delete BAM/SAM files after tabulation to save disk space. |
 | `--retain-unmapped` | Save the reads that are not counted, one FASTQ file per sample: reads that do not align in `unmapped_seq/` and, when an alignment-quality filter is set, aligned reads below the thresholds in `below_threshold_seq/` (see [Reads that are not counted](#reads-that-are-not-counted)). |
 | `--gzip-intermediate` | Write merged FASTQ intermediates as `.fastq.gz` (minimap2 reads gzip natively). |
@@ -382,15 +384,15 @@ output_folder/
 ├── OTU_Table_<name>_<db>.xlsx        # final OTU table with taxonomy
 ├── Report_<name>_<db>.html           # interactive HTML report
 ├── <db>_taxonomy_map.tsv             # cached taxonomy map
-├── profile_report.json               # profiling data (with --profile)
-└── profile_report.docx               # profiling Word report (with --profile)
+├── performance_report.json           # profiling data (with --profile)
+└── performance_report.html           # profiling report (with --profile)
 ```
 
 An output folder can be reused: the per-sample count tables left by an earlier run are removed before mapping, so the OTU table always describes the current run only.
 
 ### Reads that are not counted
 
-By default the reads that do not enter the OTU table are only counted. With **Retain unmapped reads** in the interface, or `--retain-unmapped` on the command line, they are saved as FASTQ, one file per sample, for later analysis:
+The reads that do not enter the OTU table can be saved as FASTQ, one file per sample, for later analysis. In the interface **Retain unmapped reads** is ticked by default; on the command line the reads are only counted unless `--retain-unmapped` is given:
 
 | Folder | Reads | Written when |
 |--------|-------|--------------|
@@ -459,10 +461,12 @@ Memory notes: filtering is streaming (low memory); mapping memory scales with th
 
 ## Performance Profiling
 
-Enable with `--profile` (CLI) or the **Enable Performance Profiling** checkbox (GUI). Two files are written to the output folder:
+Enable with `--profile` (CLI) or the **Enable Performance Profiling** checkbox (GUI), which is ticked by default. Two files are written to the output folder:
 
-- `profile_report.json` — raw structured metrics.
-- `profile_report.docx` — formatted Word table.
+- `performance_report.json` — raw structured metrics.
+- `performance_report.html` — the same metrics as a page, with resource usage and step details.
+
+When the analysis is started from the interface with the checkbox ticked, the HTML report opens when the analysis ends.
 
 Metrics collected per step include `wall_time_s`, `cpu_time_s`, `mem_mb`, plus step-specific counters such as `taxonomy_entries`, `sequences_total/good/bad`, `throughput_seq_s`, `files_to_map`, `success` and `failed`. A summary is also printed to the execution log.
 
@@ -497,7 +501,7 @@ Platform build scripts are included:
 
 The Windows build converts `loreon_app_icon_2.png` to an `.ico`, bundles the pipeline with PyInstaller and copies the Docker context files alongside the executable.
 
-The repository holds no pre-built installers: build them from a tagged version with these scripts, or take them from the release page when a release provides them. All scripts and the application report the same version number, defined once as `LOREON_VERSION` in `OtuUtils.py`.
+The installers built with these scripts are not stored in the repository: they are attached to the release of each version and listed, with their checksums, in [`installers/`](installers/README.md). All scripts and the application report the same version number, defined once as `LOREON_VERSION` in `OtuUtils.py`.
 
 ---
 
@@ -556,6 +560,7 @@ Enable `--debug` for exact commands, processed paths and detailed per-step outpu
 | `requirements.txt` | Python dependencies. |
 | `environment.yml` | Conda environment with pinned Python, PyQt, minimap2 and samtools. |
 | `example_data/` | Example dataset with its expected OTU table. |
+| `installers/` | Download page of the pre-built installers, with their checksums. |
 | `CHANGELOG.md` | Changes between versions. |
 | `tests/` | Automated tests (`pytest`). |
 

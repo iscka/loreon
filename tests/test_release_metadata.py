@@ -85,3 +85,48 @@ def test_windows_installer_does_not_install_python_packages():
     script = read('installer.iss')
     assert 'pip install' not in script
     assert 'Python' not in script.split('[Code]')[1]
+
+
+def test_macos_bundle_is_signed_after_its_last_change():
+    lines = read('build_dmg.sh').splitlines()
+    changes = [number for number, line in enumerate(lines)
+               if 'PlistBuddy' in line or '"$BUNDLE_DIR/"' in line]
+    signing = [number for number, line in enumerate(lines) if line.lstrip().startswith('codesign --force')]
+    staging = [number for number, line in enumerate(lines) if '"$DMG_STAGE/"' in line]
+    assert changes and signing and staging
+    assert max(changes) < signing[0] < min(staging)
+
+
+def test_debian_package_installs_executable_commands():
+    lines = read('build_deb.sh').splitlines()
+    reset = max(number for number, line in enumerate(lines) if 'chmod 644' in line)
+    for command in ('loreon', 'loreon-cli'):
+        granted = [number for number, line in enumerate(lines)
+                   if line.strip() == f'chmod 755 "$DEB_ROOT/usr/local/bin/{command}"']
+        assert granted and max(granted) > reset, command
+
+
+def test_debian_command_line_uses_the_environment_of_the_application():
+    script = read('build_deb.sh')
+    assert 'ln -sf /opt/loreon/metaGenomics_new.py' not in script
+    assert "<< 'CLIWRAPPER'" in script
+    wrapper = script.split("<< 'CLIWRAPPER'")[1].split('\nCLIWRAPPER')[0]
+    assert '/loreon/venv/bin/python3' in wrapper
+    assert '/opt/loreon/metaGenomics_new.py "$@"' in wrapper
+
+
+def test_download_page_links_the_installers_of_this_version():
+    version = OtuUtils.LOREON_VERSION
+    page = read('installers/README.md')
+    for name in (f'LOREON_Setup_{version}.exe', f'LOREON-{version}-macOS.dmg', f'loreon_{version}_amd64.deb'):
+        assert f'/releases/download/v{version}/{name}' in page, name
+
+
+def test_checksums_are_those_of_installers_listed_in_the_download_page():
+    version = OtuUtils.LOREON_VERSION
+    page = read('installers/README.md')
+    entries = [line.split() for line in read('installers/SHA256SUMS').splitlines() if line.strip()]
+    assert entries
+    for digest, name in entries:
+        assert re.fullmatch(r'[0-9a-f]{64}', digest), name
+        assert version in name and name in page, name

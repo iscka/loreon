@@ -315,13 +315,25 @@ exec "$APP_DIR/LOREON" "$@"
 LAUNCHER
 chmod 755 "$DEB_ROOT/usr/local/bin/loreon"
 
+# Command-line wrapper: the pipeline needs the Python environment that the
+# application creates for each user at its first start, not the system Python
+cat > "$DEB_ROOT/usr/local/bin/loreon-cli" << 'CLIWRAPPER'
+#!/bin/bash
+# LOREON command line — runs the pipeline with the Python environment of the application
+VENV_PYTHON="${XDG_DATA_HOME:-$HOME/.local/share}/loreon/venv/bin/python3"
+if [ ! -x "$VENV_PYTHON" ]; then
+    echo "The Python environment of LOREON does not exist yet for this user." >&2
+    echo "Start the application once with the command 'loreon': it creates the environment." >&2
+    exit 1
+fi
+exec "$VENV_PYTHON" /opt/loreon/metaGenomics_new.py "$@"
+CLIWRAPPER
+chmod 755 "$DEB_ROOT/usr/local/bin/loreon-cli"
+
 # postinst — runs after installation
 cat > "$DEB_ROOT/DEBIAN/postinst" << 'POSTINST'
 #!/bin/bash
 set -e
-
-# CLI script symlink
-ln -sf /opt/loreon/metaGenomics_new.py /usr/local/bin/loreon-cli
 
 # Make CLI script executable
 chmod +x /opt/loreon/metaGenomics_new.py 2>/dev/null || true
@@ -366,7 +378,7 @@ cat > "$DEB_ROOT/DEBIAN/prerm" << 'PRERM'
 #!/bin/bash
 set -e
 
-# Remove launcher wrapper and CLI symlink
+# Remove launcher and command-line wrapper
 rm -f /usr/local/bin/loreon
 rm -f /usr/local/bin/loreon-cli
 
@@ -409,6 +421,8 @@ find "$DEB_ROOT" -type f -exec chmod 644 {} \;
 # Executables
 chmod 755 "$DEB_ROOT${INSTALL_PREFIX}/${APP_NAME_DISPLAY}"
 chmod 755 "$DEB_ROOT${INSTALL_PREFIX}/metaGenomics_new.py"
+chmod 755 "$DEB_ROOT/usr/local/bin/loreon"
+chmod 755 "$DEB_ROOT/usr/local/bin/loreon-cli"
 find "$DEB_ROOT${INSTALL_PREFIX}" -name "*.so" -exec chmod 755 {} \; 2>/dev/null || true
 find "$DEB_ROOT${INSTALL_PREFIX}" -name "*.so.*" -exec chmod 755 {} \; 2>/dev/null || true
 # PyInstaller helper binaries inside _internal/ (e.g. python3, QtWebEngineProcess)

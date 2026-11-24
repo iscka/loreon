@@ -147,3 +147,26 @@ def test_optional_spreadsheet_writer_is_not_required():
     assert venv_manager.environment_problems(
         use_docker=False, platform='linux', which=lambda name: f'/usr/bin/{name}',
         find_spec=lambda name: None if name == 'xlsxwriter' else object()) == []
+
+
+def test_packaged_macos_application_gets_the_tool_folders_of_a_terminal():
+    path = venv_manager.path_with_tool_dirs('/usr/bin:/bin:/usr/sbin:/sbin', platform='darwin',
+                                            isdir=lambda folder: True)
+    assert path == '/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin'
+
+
+def test_tool_folders_are_added_once_and_only_when_they_exist():
+    assert venv_manager.path_with_tool_dirs(
+        '/usr/local/bin:/usr/bin', platform='darwin',
+        isdir=lambda folder: True) == '/usr/local/bin:/usr/bin:/opt/homebrew/bin'
+    assert venv_manager.path_with_tool_dirs(
+        '/usr/bin:/bin', platform='darwin',
+        isdir=lambda folder: folder == '/usr/local/bin') == '/usr/bin:/bin:/usr/local/bin'
+    assert venv_manager.path_with_tool_dirs(
+        '', platform='darwin', isdir=lambda folder: True) == '/opt/homebrew/bin:/usr/local/bin'
+
+
+def test_path_is_not_changed_on_linux_and_windows():
+    for platform in ('linux', 'win32'):
+        assert venv_manager.path_with_tool_dirs(
+            '/usr/bin', platform=platform, isdir=lambda folder: True) == '/usr/bin'

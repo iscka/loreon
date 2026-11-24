@@ -22,9 +22,10 @@
 #   ./build_dmg.sh
 #
 # Gatekeeper note:
-#   The resulting .app is NOT code-signed. First launch:
-#   right-click → Open, or run:
-#       xattr -d com.apple.quarantine /Applications/LOREON.app
+#   The .app is signed ad hoc and is not notarized by Apple. macOS blocks the
+#   first launch of a downloaded copy: allow it in System Settings > Privacy &
+#   Security (Open Anyway), or run:
+#       xattr -dr com.apple.quarantine /Applications/LOREON.app
 # =============================================================================
 
 set -e
@@ -76,6 +77,7 @@ command -v python3   >/dev/null || error "python3 not found in PATH."
 command -v sips      >/dev/null || error "sips not found. Install Xcode Command Line Tools."
 command -v iconutil  >/dev/null || error "iconutil not found. Install Xcode Command Line Tools."
 command -v hdiutil   >/dev/null || error "hdiutil not found (macOS only)."
+command -v codesign  >/dev/null || error "codesign not found (macOS only)."
 
 # ── Clean previous build ────────────────────────────────────────────────────
 info "Cleaning previous build artifacts..."
@@ -157,6 +159,14 @@ done
 
 success "Data files copied."
 
+# ── Sign the completed bundle ───────────────────────────────────────────────
+# PyInstaller signs the bundle before Info.plist is edited and the data files
+# are added: without a new signature macOS treats the application as modified.
+info "Signing the completed bundle (ad hoc)..."
+codesign --force --deep --sign - "dist/${APP_NAME}.app"
+codesign --verify --deep --strict "dist/${APP_NAME}.app" || error "The signature of the bundle is not valid."
+success "Bundle signed."
+
 # ── Create DMG with Applications symlink ────────────────────────────────────
 info "Creating DMG installer..."
 
@@ -177,18 +187,20 @@ LOREON - Long-Read ONT Metagenomic Pipeline
 ============================================
 
 PREREQUISITES:
-  Python 3.9+ must be installed on your system.
-  Install via: https://www.python.org/downloads/
-  Or via Homebrew: brew install python@3
+  Python 3.9+ must be installed on your system. The Python of the
+  Xcode Command Line Tools is suitable; install the tools with:
+    xcode-select --install
 
 INSTALLATION:
   Drag LOREON.app into the Applications folder.
 
 FIRST LAUNCH:
-  The app is not code-signed. On first launch:
-  - Right-click LOREON.app → Open → Open
-  - Or run in Terminal:
-    xattr -d com.apple.quarantine /Applications/LOREON.app
+  LOREON is not notarized by Apple, so macOS blocks the first launch
+  of a copy downloaded from the internet. To allow it:
+  - try to open LOREON, then open System Settings > Privacy & Security
+    and click "Open Anyway"
+  - or run in Terminal:
+    xattr -dr com.apple.quarantine /Applications/LOREON.app
 
   On first launch, LOREON will automatically create a Python
   virtual environment and install all required dependencies.
@@ -199,8 +211,10 @@ RUNTIME DEPENDENCIES:
   minimap2 and samtools must be installed and available in PATH.
   Install via Homebrew:
     brew install minimap2 samtools
-  Or via Conda:
+  Or via Conda; LOREON must then be started from a terminal in which
+  the environment is active:
     conda install -c bioconda minimap2 samtools
+    open -a LOREON
 
 For more info: https://github.com/iscka/loreon
 READMETXT
@@ -233,7 +247,7 @@ echo ""
 echo "  Distribution:"
 echo "    1. Share dist/${DMG_NAME}"
 echo "    2. User opens DMG, drags LOREON to Applications"
-echo "    3. First launch: right-click → Open"
+echo "    3. First launch: System Settings > Privacy & Security > Open Anyway"
 echo ""
 echo "  Runtime dependencies (user must install):"
 echo "    brew install minimap2 samtools"

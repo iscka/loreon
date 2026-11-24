@@ -27,6 +27,7 @@ from pathlib import Path
 
 PIPELINE_MODULES = ('pandas', 'numpy', 'duckdb', 'openpyxl', 'plotly', 'jinja2')
 CONDA_ENVIRONMENT_HINT = "conda env create -f environment.yml && conda activate loreon"
+MACOS_TOOL_DIRS = ('/opt/homebrew/bin', '/usr/local/bin')
 _IRREGULAR_PACKAGES = {
     'libglib-2.0.so.0': 'libglib2.0-0',
     'libgthread-2.0.so.0': 'libglib2.0-0',
@@ -180,6 +181,25 @@ def environment_problems(use_docker, platform=None, which=shutil.which,
                 f"'pip install -r requirements.txt' or create the conda environment of the README."
             )
     return problems
+
+
+def path_with_tool_dirs(path, platform=None, isdir=None):
+    """PATH for the packaged application, with the folders that a terminal adds on macOS.
+
+    An application opened from the Finder gets only the system folders in
+    PATH, so it does not find minimap2, samtools or Docker. The folders
+    where Homebrew and most installers put their commands are added after
+    the folders already listed, so that every command found before is still
+    the one used. Folders that do not exist or are already listed are left
+    out; on other systems the value is returned unchanged.
+    """
+    platform = sys.platform if platform is None else platform
+    if platform != 'darwin':
+        return path
+    isdir = os.path.isdir if isdir is None else isdir
+    listed = [entry for entry in path.split(':') if entry]
+    added = [folder for folder in MACOS_TOOL_DIRS if folder not in listed and isdir(folder)]
+    return ':'.join(listed + added)
 
 
 def _data_dir() -> Path:

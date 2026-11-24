@@ -1,4 +1,5 @@
 """Graphical interface defaults and the worker that launches the pipeline."""
+import os
 import sys
 import threading
 import time
@@ -110,12 +111,18 @@ def test_worker_passes_the_sample_time_limit_only_when_set(app):
     assert '--sample-timeout' not in worker._pipeline_args('in', 'out', 'db.fasta')
 
 
-def test_retain_unmapped_reads_is_one_checkbox_off_by_default(window):
+def test_retain_unmapped_reads_is_one_checkbox_ticked_by_default(window):
     assert window.retain_unmapped_check.text() == 'Retain unmapped reads'
-    assert not window.retain_unmapped_check.isChecked()
-    assert window.collect_settings()['retain_unmapped'] is False
-    window.retain_unmapped_check.setChecked(True)
+    assert window.retain_unmapped_check.isChecked()
     assert window.collect_settings()['retain_unmapped'] is True
+    window.retain_unmapped_check.setChecked(False)
+    assert window.collect_settings()['retain_unmapped'] is False
+
+
+def test_profiling_and_bam_removal_are_ticked_by_default(window):
+    settings = window.collect_settings()
+    assert window.profile_check.isChecked() and settings['profile'] is True
+    assert window.delete_bam_check.isChecked() and settings['delete_bam'] is True
 
 
 def test_retain_unmapped_reads_cannot_be_changed_during_a_run(window):
@@ -455,3 +462,93 @@ def test_installed_application_still_creates_it_on_other_systems(app, monkeypatc
     monkeypatch.setattr(venv_manager, 'create_venv', lambda progress_callback=None: used.append('create'))
     assert pipeline_gui._ensure_venv(app) is True
     assert used == ['check', 'create']
+
+
+def test_packaged_macos_application_adds_the_tool_folders_to_path(monkeypatch, tmp_path):
+    folders = (str(tmp_path / 'homebrew'), str(tmp_path / 'local'))
+    for folder in folders:
+        os.mkdir(folder)
+    monkeypatch.setattr(venv_manager, 'MACOS_TOOL_DIRS', folders)
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    monkeypatch.setenv('PATH', '/usr/bin:/bin')
+    pipeline_gui._add_tool_dirs_to_path()
+    assert os.environ['PATH'] == ':'.join(('/usr/bin', '/bin') + folders)
+
+
+def test_application_run_from_the_source_code_keeps_its_path(monkeypatch, tmp_path):
+    monkeypatch.setattr(venv_manager, 'MACOS_TOOL_DIRS', (str(tmp_path),))
+    monkeypatch.setattr(sys, 'platform', 'darwin')
+    monkeypatch.setenv('PATH', '/usr/bin:/bin')
+    pipeline_gui._add_tool_dirs_to_path()
+    assert os.environ['PATH'] == '/usr/bin:/bin'
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    """Record the files that the window asks the system to open, instead of opening them."""
+    files = []
+    monkeypatch.setattr(pipeline_gui.QDesktopServices, 'openUrl',
+                        lambda url: files.append(url.toLocalFile()) or True)
+    return files
+
+
+def start_run(window, tmp_path, monkeypatch):
+    window.start_pipeline_signal.disconnect()
+    window.start_pipeline_signal.connect(lambda settings: None)
+    monkeypatch.setattr(pipeline_gui, 'environment_problems', lambda use_docker: [])
+    monkeypatch.setattr(window, '_docker_available', lambda: True)
+    window.docker_check.setChecked(True)
+    window.input_dir_label.setText(str(tmp_path))
+    window.output_dir_label.setText(str(tmp_path))
+    window.db_label.setText(str(tmp_path / 'db.fasta'))
+    window.run_pipeline()
+    assert window.is_running
+
+
+def test_performance_report_opens_when_profiling_is_ticked(window, opened, tmp_path, monkeypatch):
+    start_run(window, tmp_path, monkeypatch)
+    (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).write_text('<html></html>')
+    window.pipeline_finished(True, None)
+    assert opened == [str(tmp_path / 'performance_report.html')]
+
+
+def test_performance_report_is_not_opened_when_profiling_is_unticked(window, opened, tmp_path, monkeypatch):
+    window.profile_check.setChecked(False)
+    start_run(window, tmp_path, monkeypatch)
+    (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).write_text('<html></html>')
+    window.pipeline_finished(True, None)
+    assert opened == []
+
+
+def test_performance_report_of_an_earlier_run_is_not_opened(window, opened, tmp_path, monkeypatch):
+    (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).write_text('<html>earlier run</html>')
+    start_run(window, tmp_path, monkeypatch)
+    window.pipeline_finished(True, None)
+    assert opened == []
+    assert 'Performance report not generated' in window.log_output.toPlainText()
+
+
+def test_performance_report_is_not_opened_when_the_run_fails(window, opened, dialogs, tmp_path, monkeypatch):
+    start_run(window, tmp_path, monkeypatch)
+    (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).write_text('<html></html>')
+    window.pipeline_finished(False, None)
+    assert opened == []
+
+
+def test_analysis_report_is_opened_after_the_performance_report(window, opened, tmp_path, monkeypatch):
+    report = tmp_path / 'Report_run_db.html'
+    report.write_text('<html></html>')
+    start_run(window, tmp_path, monkeypatch)
+    (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).write_text('<html></html>')
+    window.pipeline_finished(True, str(report))
+    assert opened == [str(tmp_path / 'performance_report.html'), str(report)]
+
+
+def test_profiler_writes_the_report_that_the_interface_opens(tmp_path):
+    from pipeline_profiler import PipelineProfiler
+    profiler = PipelineProfiler()
+    profiler.start_step('Step 1: Taxonomy')
+    profiler.end_step('Step 1: Taxonomy')
+    profiler.save(tmp_path)
+    assert (tmp_path / pipeline_gui.PERFORMANCE_REPORT_NAME).is_file()

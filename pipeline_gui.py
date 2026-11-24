@@ -37,7 +37,7 @@ if getattr(sys, 'frozen', False):
         )
 
 from venv_manager import (
-    display_problem, environment_problems, pyqt_import_problem, qt_library_problem
+    display_problem, environment_problems, path_with_tool_dirs, pyqt_import_problem, qt_library_problem
 )
 
 try:
@@ -87,9 +87,21 @@ except ImportError:
     print("ERROR: Cannot find 'OtuUtils.py'.")
     sys.exit(1)
 
+PERFORMANCE_REPORT_NAME = 'performance_report.html'
+
+
 def default_example_output_dir():
     """Folder that receives the results of the example dataset."""
     return Path.home() / 'LOREON_example_output'
+
+
+def _file_signature(path):
+    """Modification time and size of a file, or None when it does not exist."""
+    try:
+        status = Path(path).stat()
+    except OSError:
+        return None
+    return status.st_mtime_ns, status.st_size
 
 
 class DockerBuildDialog(QDialog):
@@ -244,6 +256,7 @@ class MainWindow(QMainWindow):
         self._run_warning = None
         self._applying_preset = False
         self._example_run = False
+        self._performance_report_before = None
         icon = _load_icon()
         self.setWindowIcon(icon)
         self.init_ui()
@@ -310,15 +323,18 @@ class MainWindow(QMainWindow):
         options_left_layout.addWidget(self.force_tax_map_check)
         self.profile_check = QCheckBox("Enable Performance Profiling")
         self.profile_check.setToolTip(
-            "Saves performance_report.json in the output folder with wall time,\n"
-            "CPU time, memory and domain metrics for each pipeline step."
+            "Saves performance_report.json and performance_report.html in the\n"
+            "output folder with wall time, CPU time, memory and domain metrics\n"
+            "for each pipeline step. The HTML report opens when the analysis ends."
         )
+        self.profile_check.setChecked(True)
         options_left_layout.addWidget(self.profile_check)
         self.delete_bam_check = QCheckBox("Delete BAM/SAM after analysis")
         self.delete_bam_check.setToolTip(
             "Delete intermediate BAM and SAM files after tabulation\n"
             "to free disk space. The OTU results are NOT affected."
         )
+        self.delete_bam_check.setChecked(True)
         options_left_layout.addWidget(self.delete_bam_check)
         self.retain_unmapped_check = QCheckBox("Retain unmapped reads")
         self.retain_unmapped_check.setToolTip(
@@ -328,6 +344,7 @@ class MainWindow(QMainWindow):
             "these thresholds go to the folder below_threshold_seq.\n"
             "The HTML report lists the files. The OTU results are NOT affected."
         )
+        self.retain_unmapped_check.setChecked(True)
         options_left_layout.addWidget(self.retain_unmapped_check)
         self.flat_sh_check = QCheckBox("Flat SH (UNITE only)")
         self.flat_sh_check.setToolTip(
@@ -814,6 +831,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", "Input, Output and Database paths are mandatory.")
             self.append_log("--- ERROR: Missing paths. Pipeline aborted. ---")
             return
+        self._performance_report_before = _file_signature(self._performance_report_path())
         self.set_running_state(True)
         self.start_pipeline_signal.emit(settings)
 
@@ -852,6 +870,8 @@ class MainWindow(QMainWindow):
             else:
                 self.status_bar.setFormat("Completed successfully!")
             self.status_bar.setValue(100)
+            if self.profile_check.isChecked():
+                self._open_performance_report()
             if self.open_report_check.isChecked() and html_report_path:
                 self.append_log(f"Opening report: {html_report_path}")
                 try:
@@ -881,6 +901,29 @@ class MainWindow(QMainWindow):
                 QMessageBox.critical(self, "Pipeline Error",
                                      "Execution failed. Check the log for details.")
             self.status_bar.setValue(0)
+
+    def _performance_report_path(self):
+        return Path(self.output_dir_label.text()) / PERFORMANCE_REPORT_NAME
+
+    def _open_performance_report(self):
+        """Open the performance report, if the run that has just ended wrote it.
+
+        A report left in the output folder by an earlier run is recognised
+        because it is unchanged since the run started, and it is not opened.
+        It is opened before the analysis report, which stays in front.
+        """
+        if not self.output_dir_label.text():
+            return
+        path = self._performance_report_path()
+        signature = _file_signature(path)
+        if signature is None or signature == self._performance_report_before:
+            self.append_log("Performance report not generated (check log).")
+            return
+        self.append_log(f"Opening performance report: {path}")
+        try:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        except Exception as e:
+            self.append_log(f"Cannot open performance report automatically: {e}")
 
     def set_running_state(self, is_running):
         self.is_running = is_running
@@ -988,6 +1031,16 @@ def _ensure_venv(app):
         return False
 
 
+def _add_tool_dirs_to_path():
+    """Add to the PATH of the packaged application the folders that a terminal has on macOS.
+
+    Without them an application opened from the Finder does not find
+    minimap2, samtools or Docker.
+    """
+    if getattr(sys, 'frozen', False):
+        os.environ['PATH'] = path_with_tool_dirs(os.environ.get('PATH', ''))
+
+
 def startup_problem():
     """Reason why the window cannot be opened on this computer, or None."""
     if not sys.platform.startswith('linux') or getattr(sys, 'frozen', False):
@@ -1002,6 +1055,7 @@ def startup_problem():
 
 if __name__ == "__main__":
     multiprocessing.freeze_support()
+    _add_tool_dirs_to_path()
     blocking_problem = startup_problem()
     if blocking_problem:
         print(blocking_problem, file=sys.stderr)

@@ -2,10 +2,15 @@
 
 ## 1.1.1 (unreleased)
 
-- New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. The option is off by default and does not change the OTU table.
+- New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. In the interface the option is ticked by default; on the command line the reads are saved only when it is given. It does not change the OTU table.
 - The HTML report and `mapping_stats.json` give the path of each of these files and the number of reads it holds.
+- Interface: **Enable Performance Profiling** and **Delete BAM/SAM after analysis** are ticked by default. With profiling on, the performance report `performance_report.html` opens when the analysis ends.
 - Windows: the installer no longer installs Python packages or asks for Python, and the installed application no longer creates a virtual environment at first launch. Both were unused, because the interface is self-contained and the pipeline runs in Docker.
 - Windows: the installer includes the icon used by its shortcuts, and `build_installer.bat` no longer ends with an error after a successful compilation.
+- macOS: the application bundle is signed again after `Info.plist` and the data files are added. Its signature was not valid, and macOS treated a downloaded copy as modified.
+- macOS: the packaged application adds `/opt/homebrew/bin` and `/usr/local/bin` to `PATH`. Opened from the Finder, it did not find minimap2, samtools or Docker.
+- Linux: the commands `loreon` and `loreon-cli` installed by the Debian package work. The first was not executable; the second ran the pipeline with the system Python instead of the environment created by the application.
+- Pre-built installers are attached to the release; the page `installers/` lists them, with their checksums and the steps to install them.
 
 ## 1.1.0 (unreleased)
 

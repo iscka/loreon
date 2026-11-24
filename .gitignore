@@ -77,3 +77,6 @@ EPI2ME_issue_export/launch.json
 # Example dataset (kept in the repository)
 !example_data/**
 example_data/**/*_taxonomy_map.tsv
+
+# Download page of the pre-built installers (kept in the repository)
+!installers/README.md
