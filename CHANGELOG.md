@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.1.1 (unreleased)
+## 1.1.1 (2026-11-24)
 
 - New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. In the interface the option is ticked by default; on the command line the reads are saved only when it is given. It does not change the OTU table.
 - The HTML report and `mapping_stats.json` give the path of each of these files and the number of reads it holds.
@@ -12,7 +12,7 @@
 - Linux: the commands `loreon` and `loreon-cli` installed by the Debian package work. The first was not executable; the second ran the pipeline with the system Python instead of the environment created by the application.
 - Pre-built installers are attached to the release; the page `installers/` lists them, with their checksums and the steps to install them.
 
-## 1.1.0 (unreleased)
+## 1.1.0 (not released)
 
 Changes made in response to the review of the manuscript.
 
