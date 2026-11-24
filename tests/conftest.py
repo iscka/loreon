@@ -6,7 +6,8 @@ import pytest
 
 TESTS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = TESTS_DIR.parent
-for entry in (str(REPO_ROOT), str(TESTS_DIR)):
+SOURCES_DIR = REPO_ROOT / 'sources'
+for entry in (str(SOURCES_DIR), str(TESTS_DIR)):
     if entry not in sys.path:
         sys.path.insert(0, entry)
 

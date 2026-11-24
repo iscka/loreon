@@ -18,15 +18,15 @@
 #   - PyQt5 system libraries:
 #       sudo apt install python3-pyqt5 libxcb-xinerama0 libxcb-cursor0 libgl1
 #   - All project Python dependencies:
-#       pip install -r requirements.txt
+#       pip install -r sources/requirements.txt
 #
 # Runtime dependencies (automatically declared in .deb, installed separately):
 #   - minimap2  (conda install -c bioconda minimap2)
 #   - samtools  (sudo apt install samtools  OR  conda install -c bioconda samtools)
 #
 # Usage:
-#   chmod +x build_deb.sh
-#   ./build_deb.sh
+#   chmod +x scripts/build_deb.sh
+#   scripts/build_deb.sh
 #
 # Install the .deb:
 #   sudo dpkg -i dist/loreon_1.0_amd64.deb
@@ -37,7 +37,7 @@
 # =============================================================================
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="loreon"
@@ -51,6 +51,9 @@ MAINTAINER="Roberto Scarponi <roberto.scarponi@dottorandi.unipg.it>"
 DESCRIPTION="Long-Read ONT Metagenomic Pipeline"
 HOMEPAGE="https://github.com/iscka/loreon"
 
+# Folder of the application files, relative to the root of the repository
+SRC="sources"
+
 # Files to bundle inside the package
 DATA_FILES=(
     Dockerfile
@@ -58,7 +61,6 @@ DATA_FILES=(
     loreon_app_icon_2.png
     loreon.jpeg
     credits.md
-    LICENSE
     metaGenomics_new.py
     OtuUtils.py
     ResultsReader.py
@@ -79,11 +81,11 @@ error()   { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; exit 1; }
 
 # ── Pre-flight checks ───────────────────────────────────────────────────────
 info "Checking required files..."
-[ -f "pipeline_gui.py" ]        || error "pipeline_gui.py not found."
-[ -f "loreon_app_icon_2.png" ]  || error "loreon_app_icon_2.png not found."
-[ -f "loreon.jpeg" ]            || error "loreon.jpeg not found."
-[ -f "credits.md" ]             || error "credits.md not found."
-[ -f "template.html" ]          || error "template.html not found."
+[ -f "$SRC/pipeline_gui.py" ]        || error "$SRC/pipeline_gui.py not found."
+[ -f "$SRC/loreon_app_icon_2.png" ]  || error "$SRC/loreon_app_icon_2.png not found."
+[ -f "$SRC/loreon.jpeg" ]            || error "$SRC/loreon.jpeg not found."
+[ -f "$SRC/credits.md" ]             || error "$SRC/credits.md not found."
+[ -f "$SRC/template.html" ]          || error "$SRC/template.html not found."
 
 # Check build tools
 command -v python3   >/dev/null || error "python3 not found in PATH."
@@ -125,9 +127,10 @@ pyinstaller \
     --hidden-import=encodings.latin_1 \
     --collect-all=PyQt5 \
     --hidden-import=venv_manager \
+    --paths "$SRC" \
     --clean \
     -y \
-    pipeline_gui.py
+    "$SRC/pipeline_gui.py"
 
 success "PyInstaller build complete."
 
@@ -136,14 +139,15 @@ PYINST_DIR="dist/${APP_NAME_DISPLAY}"
 info "Copying data files into PyInstaller output..."
 
 for f in "${DATA_FILES[@]}"; do
-    if [ -f "$f" ]; then
-        cp "$f" "$PYINST_DIR/"
+    if [ -f "$SRC/$f" ]; then
+        cp "$SRC/$f" "$PYINST_DIR/"
     else
-        warn "File not found, skipping: $f"
+        warn "File not found, skipping: $SRC/$f"
     fi
 done
-[ -d example_data ] && cp -R example_data "$PYINST_DIR/"
-[ -f .dockerignore ] && cp .dockerignore "$PYINST_DIR/"
+cp LICENSE "$PYINST_DIR/"
+[ -d "$SRC/example_data" ] && cp -R "$SRC/example_data" "$PYINST_DIR/"
+[ -f "$SRC/.dockerignore" ] && cp "$SRC/.dockerignore" "$PYINST_DIR/"
 
 success "Data files copied."
 
@@ -184,16 +188,16 @@ for SIZE in 48 128 256; do
     mkdir -p "$ICON_DIR"
     if command -v convert >/dev/null 2>&1; then
         # ImageMagick available: resize icon
-        convert loreon_app_icon_2.png -resize ${SIZE}x${SIZE} "$ICON_DIR/loreon.png"
+        convert "$SRC/loreon_app_icon_2.png" -resize ${SIZE}x${SIZE} "$ICON_DIR/loreon.png"
     else
         # Fallback: copy original
-        cp loreon_app_icon_2.png "$ICON_DIR/loreon.png"
+        cp "$SRC/loreon_app_icon_2.png" "$ICON_DIR/loreon.png"
     fi
 done
 
 # Pixmaps fallback (legacy)
 mkdir -p "$DEB_ROOT/usr/share/pixmaps"
-cp loreon_app_icon_2.png "$DEB_ROOT/usr/share/pixmaps/loreon.png"
+cp "$SRC/loreon_app_icon_2.png" "$DEB_ROOT/usr/share/pixmaps/loreon.png"
 
 # Man page (optional, minimal)
 mkdir -p "$DEB_ROOT/usr/share/man/man1"
@@ -236,7 +240,7 @@ gzip -f "$DEB_ROOT/usr/share/man/man1/loreon.1"
 
 # Documentation
 mkdir -p "$DEB_ROOT/usr/share/doc/loreon"
-cp credits.md "$DEB_ROOT/usr/share/doc/loreon/"
+cp "$SRC/credits.md" "$DEB_ROOT/usr/share/doc/loreon/"
 cat > "$DEB_ROOT/usr/share/doc/loreon/copyright" << COPYR
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
 Upstream-Name: LOREON

@@ -7,12 +7,12 @@ pytest.importorskip('jinja2')
 import jinja2
 
 import report_generator
-from helpers import REPO_ROOT
+from helpers import SOURCES_DIR
 
 
 def render_header(params):
-    environment = jinja2.Environment(loader=jinja2.FileSystemLoader(str(REPO_ROOT)))
-    source = (REPO_ROOT / 'template.html').read_text(encoding='utf-8')
+    environment = jinja2.Environment(loader=jinja2.FileSystemLoader(str(SOURCES_DIR)))
+    source = (SOURCES_DIR / 'template.html').read_text(encoding='utf-8')
     start = source.index('{# --- Length Filter --- #}')
     end = source.index('{# --- Quality Filter --- #}')
     return environment.from_string(source[start:end]).render(analysis_params=params)

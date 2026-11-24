@@ -7,7 +7,7 @@ import pytest
 
 import OtuUtils
 import metaGenomics_new
-from helpers import REPO_ROOT, run_cli, run_guarded
+from helpers import SOURCES_DIR, run_cli, run_guarded
 
 HEADER = "OTU_ID\tTaxonomy\tKingdom\tPhylum\tClass\tOrder\tFamily\tGenus\tSpecies\tDetails\tS1\tS2\n"
 
@@ -118,9 +118,9 @@ def test_example_writes_its_taxonomy_map_to_the_output_folder(tmp_path):
 def test_example_runs_cleanly_from_a_read_only_application_folder(tmp_path):
     app = tmp_path / 'app'
     app.mkdir()
-    for source in REPO_ROOT.glob('*.py'):
+    for source in SOURCES_DIR.glob('*.py'):
         shutil.copy2(source, app / source.name)
-    shutil.copy2(REPO_ROOT / 'template.html', app / 'template.html')
+    shutil.copy2(SOURCES_DIR / 'template.html', app / 'template.html')
     shutil.copytree(OtuUtils.EXAMPLE_DIR, app / 'example_data',
                     ignore=shutil.ignore_patterns('*_taxonomy_map.tsv'))
     locked = [app / 'example_data'] + sorted((app / 'example_data').rglob('*'))

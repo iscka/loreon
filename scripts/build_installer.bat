@@ -1,5 +1,6 @@
 @echo off
 setlocal enabledelayedexpansion
+cd /d "%~dp0.."
 
 echo ============================================================
 echo  LOREON Installer Builder
@@ -77,7 +78,7 @@ echo.
 REM ── Verifica dist\LOREON ────────────────────────────────────
 if not exist "dist\LOREON\LOREON.exe" (
     echo [ERRORE] dist\LOREON\LOREON.exe non trovato.
-    echo Esegui prima build_exe.bat per compilare l'eseguibile.
+    echo Esegui prima scripts\build_exe.bat per compilare l'eseguibile.
     pause
     exit /b 1
 )
@@ -85,9 +86,9 @@ echo [OK] dist\LOREON\ trovata.
 echo.
 
 REM ── Verifica icona ──────────────────────────────────────────
-if not exist "loreon_app_icon_2.ico" (
-    echo [ATTENZIONE] loreon_app_icon_2.ico non trovata.
-    echo             Per l'icona corretta, esegui prima build_exe.bat
+if not exist "sources\loreon_app_icon_2.ico" (
+    echo [ATTENZIONE] sources\loreon_app_icon_2.ico non trovata.
+    echo             Per l'icona corretta, esegui prima scripts\build_exe.bat
     echo.
 )
 
@@ -97,7 +98,7 @@ if not exist "windows_setup" mkdir windows_setup
 REM ── Compilazione ────────────────────────────────────────────
 echo Compilazione installer in corso...
 echo.
-"%ISCC%" installer.iss
+"%ISCC%" scripts\installer.iss
 
 if %ERRORLEVEL% neq 0 (
     echo.

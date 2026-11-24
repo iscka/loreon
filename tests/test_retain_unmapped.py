@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import OtuUtils
-from helpers import REPO_ROOT, make_tool, run_cli, run_guarded, write_fastq
+from helpers import SOURCES_DIR, make_tool, run_cli, run_guarded, write_fastq
 
 HEADER = (
     b"@HD\tVN:1.6\tSO:coordinate\n"
@@ -340,7 +340,7 @@ def report_text(folder, mapping_stats):
     (folder / 'OTU_Table.tsv').write_text(OTU_TABLE, encoding='utf-8')
     (folder / 'mapping_stats.json').write_text(json.dumps(mapping_stats), encoding='utf-8')
     returncode, output, hung = run_guarded(
-        [sys.executable, str(REPO_ROOT / 'report_generator.py'),
+        [sys.executable, str(SOURCES_DIR / 'report_generator.py'),
          '-f', str(folder / 'report_filtering_0_0.tsv'), '-otu', str(folder / 'OTU_Table.xlsx'),
          '-o', str(folder / 'report.html'), '-ms', str(folder / 'mapping_stats.json')], timeout=120)
     assert returncode == 0 and not hung, output

@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Layout of the repository: the application, that is the Python scripts and the files they use at run time, is in `sources/`; the scripts that build the installers are in `scripts/`. The commands of the README are run from `sources/`. The installed application and the published installers do not change.
+
 ## 1.1.1 (2026-11-24)
 
 - New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. In the interface the option is ticked by default; on the command line the reads are saved only when it is given. It does not change the OTU table.

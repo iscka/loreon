@@ -1,5 +1,11 @@
 # -*- mode: python ; coding: utf-8 -*-
+import os
+
 from PyInstaller.utils.hooks import collect_all
+
+ROOT = os.path.dirname(SPECPATH)
+SOURCES = os.path.join(ROOT, 'sources')
+ICON = os.path.join(ROOT, 'LOREON_build.icns')
 
 datas = []
 binaries = []
@@ -9,8 +15,8 @@ datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
 
 a = Analysis(
-    ['pipeline_gui.py'],
-    pathex=[],
+    [os.path.join(SOURCES, 'pipeline_gui.py')],
+    pathex=[SOURCES],
     binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
@@ -39,7 +45,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon=['LOREON_build.icns'],
+    icon=[ICON],
 )
 coll = COLLECT(
     exe,
@@ -53,6 +59,6 @@ coll = COLLECT(
 app = BUNDLE(
     coll,
     name='LOREON.app',
-    icon='LOREON_build.icns',
+    icon=ICON,
     bundle_identifier=None,
 )

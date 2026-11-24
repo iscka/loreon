@@ -6,7 +6,7 @@ import sys
 import pytest
 
 import venv_manager
-from helpers import REPO_ROOT
+from helpers import SOURCES_DIR
 
 LDD_OUTPUT = """\
 \tlinux-vdso.so.1 (0x0000ffff9a2c4000)
@@ -22,8 +22,8 @@ def run_gui_with_broken_pyqt(tmp_path, error_statement):
     package = tmp_path / 'broken' / 'PyQt5'
     package.mkdir(parents=True)
     (package / '__init__.py').write_text(error_statement + '\n')
-    env = dict(os.environ, PYTHONPATH=f"{tmp_path / 'broken'}{os.pathsep}{REPO_ROOT}")
-    return subprocess.run([sys.executable, str(REPO_ROOT / 'pipeline_gui.py')],
+    env = dict(os.environ, PYTHONPATH=f"{tmp_path / 'broken'}{os.pathsep}{SOURCES_DIR}")
+    return subprocess.run([sys.executable, str(SOURCES_DIR / 'pipeline_gui.py')],
                           capture_output=True, text=True, env=env, timeout=60)
 
 

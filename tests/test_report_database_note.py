@@ -9,7 +9,7 @@ pytest.importorskip('pandas')
 pytest.importorskip('plotly')
 pytest.importorskip('jinja2')
 
-from helpers import REPO_ROOT, run_guarded
+from helpers import SOURCES_DIR, run_guarded
 
 DATABASE_NOTE = (
     'These results depend on the reference database. LOREON assigns each read to the reference '
@@ -87,7 +87,7 @@ def read_report(folder, with_results):
     """Run the report generator on a small set of result files and parse the page it writes."""
     folder.mkdir()
     (folder / 'report_filtering_0_0.tsv').write_text(FILTER_REPORT, encoding='utf-8')
-    command = [sys.executable, str(REPO_ROOT / 'report_generator.py'),
+    command = [sys.executable, str(SOURCES_DIR / 'report_generator.py'),
                '-f', str(folder / 'report_filtering_0_0.tsv'),
                '-otu', str(folder / 'OTU_Table.xlsx'),
                '-o', str(folder / 'report.html')]

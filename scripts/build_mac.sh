@@ -5,12 +5,12 @@
 #
 # Requirements (on the build machine):
 #   - Python 3.8+  with pip
-#   - PyQt5 and all project dependencies (pip install -r requirements.txt)
+#   - PyQt5 and all project dependencies (pip install -r sources/requirements.txt)
 #   - Xcode Command Line Tools  (for sips / iconutil / hdiutil)
 #
 # Usage:
-#   chmod +x build_mac.sh
-#   ./build_mac.sh
+#   chmod +x scripts/build_mac.sh
+#   scripts/build_mac.sh
 #
 # Gatekeeper note:
 #   The resulting .app is NOT code-signed. The first time you open it,
@@ -19,17 +19,20 @@
 # =============================================================================
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
+
+# Folder of the application files, relative to the root of the repository
+SRC="sources"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 info()  { echo "[INFO]  $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
 
 # ── Checks ───────────────────────────────────────────────────────────────────
-[ -f "pipeline_gui.py" ]        || error "pipeline_gui.py not found."
-[ -f "loreon_app_icon_2.png" ]  || error "loreon_app_icon_2.png not found."
-[ -f "loreon.jpeg" ]            || error "loreon.jpeg not found."
-[ -f "credits.md" ]             || error "credits.md not found."
+[ -f "$SRC/pipeline_gui.py" ]        || error "$SRC/pipeline_gui.py not found."
+[ -f "$SRC/loreon_app_icon_2.png" ]  || error "$SRC/loreon_app_icon_2.png not found."
+[ -f "$SRC/loreon.jpeg" ]            || error "$SRC/loreon.jpeg not found."
+[ -f "$SRC/credits.md" ]             || error "$SRC/credits.md not found."
 
 # ── Install build tools ───────────────────────────────────────────────────────
 info "Installing PyInstaller and Pillow..."
@@ -41,15 +44,15 @@ ICONSET="LOREON_build.iconset"
 rm -rf "$ICONSET"
 mkdir "$ICONSET"
 
-sips -z 16   16   loreon_app_icon_2.png --out "$ICONSET/icon_16x16.png"      >/dev/null
-sips -z 32   32   loreon_app_icon_2.png --out "$ICONSET/icon_16x16@2x.png"   >/dev/null
-sips -z 32   32   loreon_app_icon_2.png --out "$ICONSET/icon_32x32.png"      >/dev/null
-sips -z 64   64   loreon_app_icon_2.png --out "$ICONSET/icon_32x32@2x.png"   >/dev/null
-sips -z 128  128  loreon_app_icon_2.png --out "$ICONSET/icon_128x128.png"    >/dev/null
-sips -z 256  256  loreon_app_icon_2.png --out "$ICONSET/icon_128x128@2x.png" >/dev/null
-sips -z 256  256  loreon_app_icon_2.png --out "$ICONSET/icon_256x256.png"    >/dev/null
-sips -z 512  512  loreon_app_icon_2.png --out "$ICONSET/icon_256x256@2x.png" >/dev/null
-sips -z 512  512  loreon_app_icon_2.png --out "$ICONSET/icon_512x512.png"    >/dev/null
+sips -z 16   16   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_16x16.png"      >/dev/null
+sips -z 32   32   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_16x16@2x.png"   >/dev/null
+sips -z 32   32   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_32x32.png"      >/dev/null
+sips -z 64   64   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_32x32@2x.png"   >/dev/null
+sips -z 128  128  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_128x128.png"    >/dev/null
+sips -z 256  256  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_128x128@2x.png" >/dev/null
+sips -z 256  256  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_256x256.png"    >/dev/null
+sips -z 512  512  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_256x256@2x.png" >/dev/null
+sips -z 512  512  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_512x512.png"    >/dev/null
 iconutil -c icns "$ICONSET" -o loreon_build.icns
 rm -rf "$ICONSET"
 
@@ -66,29 +69,30 @@ python3 -m PyInstaller \
     --hidden-import=encodings.utf_8 \
     --hidden-import=encodings.ascii \
     --collect-all=PyQt5 \
+    --paths "$SRC" \
     --clean \
     -y \
-    pipeline_gui.py
+    "$SRC/pipeline_gui.py"
 
 # ── Copy data files into the .app bundle ─────────────────────────────────────
 BUNDLE="dist/LOREON.app/Contents/MacOS"
 info "Copying data files into $BUNDLE ..."
 
-cp Dockerfile              "$BUNDLE/"
-cp requirements.txt        "$BUNDLE/"
-cp loreon_app_icon_2.png   "$BUNDLE/"
-cp loreon.jpeg             "$BUNDLE/"
-cp credits.md              "$BUNDLE/"
+cp "$SRC/Dockerfile"              "$BUNDLE/"
+cp "$SRC/requirements.txt"        "$BUNDLE/"
+cp "$SRC/loreon_app_icon_2.png"   "$BUNDLE/"
+cp "$SRC/loreon.jpeg"             "$BUNDLE/"
+cp "$SRC/credits.md"              "$BUNDLE/"
 cp LICENSE                 "$BUNDLE/"
-cp metaGenomics_new.py     "$BUNDLE/"
-cp OtuUtils.py             "$BUNDLE/"
-cp ResultsReader.py        "$BUNDLE/"
-cp PipelineLogger.py       "$BUNDLE/"
-cp report_generator.py     "$BUNDLE/"
-cp pipeline_profiler.py    "$BUNDLE/"
-cp template.html           "$BUNDLE/"
-cp -R example_data         "$BUNDLE/"
-[ -f .dockerignore ] && cp .dockerignore "$BUNDLE/"
+cp "$SRC/metaGenomics_new.py"     "$BUNDLE/"
+cp "$SRC/OtuUtils.py"             "$BUNDLE/"
+cp "$SRC/ResultsReader.py"        "$BUNDLE/"
+cp "$SRC/PipelineLogger.py"       "$BUNDLE/"
+cp "$SRC/report_generator.py"     "$BUNDLE/"
+cp "$SRC/pipeline_profiler.py"    "$BUNDLE/"
+cp "$SRC/template.html"           "$BUNDLE/"
+cp -R "$SRC/example_data"       "$BUNDLE/"
+[ -f "$SRC/.dockerignore" ] && cp "$SRC/.dockerignore" "$BUNDLE/"
 
 # ── Create .dmg ───────────────────────────────────────────────────────────────
 info "Creating LOREON_mac.dmg ..."

@@ -109,7 +109,7 @@ Installed by the conda environment file or via `pip install -r requirements.txt`
 
 Pre-built installers for Windows, macOS and Linux are attached to each release: the page [`installers/`](installers/README.md) lists them, with their checksums and the steps to install them. The two routes below install LOREON from the source code.
 
-Download or clone the repository, open a terminal in its folder and follow one of the two routes. Then check the result with the [example dataset](#example-dataset).
+Download or clone the repository, open a terminal in its `sources` folder and follow one of the two routes. The commands of this page are run from that folder, unless stated otherwise. Then check the result with the [example dataset](#example-dataset).
 
 ### With Conda (recommended for Linux/macOS)
 
@@ -175,7 +175,7 @@ python metaGenomics_new.py \
 
 ## Example Dataset
 
-The folder [`example_data`](example_data) holds three samples of 500 reads from yeast mock communities, a subset of the UNITE database and the OTU table expected for them (2.3 MB in all; sources and licences are in its [README](example_data/README.md)).
+The folder [`sources/example_data`](sources/example_data) holds three samples of 500 reads from yeast mock communities, a subset of the UNITE database and the OTU table expected for them (2.3 MB in all; sources and licences are in its [README](sources/example_data/README.md)).
 
 - Command line: `python metaGenomics_new.py --example` analyses it with the default settings, writes the results to `./loreon_example_output` (or to the folder given with `-o`) and compares the read counts with the expected table. The run takes less than a minute and ends with `The installation works.` and exit status `0`; if the tables differ, the differing cells are listed and the exit status is `1`.
 - Interface: **RUN EXAMPLE DATASET** fills the form, runs the analysis in `LOREON_example_output` in the home folder and shows the outcome of the comparison. It works in Docker mode as well.
@@ -485,13 +485,13 @@ Under the hood the host folders are bind-mounted into the container as `/data/in
 
 Mapping needs memory in proportion to the reference database. If a tool is reported as *killed*, raise the memory assigned to Docker (Docker Desktop → Settings → Resources) or lower the number of parallel jobs.
 
-The helper script `run_loreon.sh` runs the containerised pipeline directly from a shell, creating `~/Documents/loreon/{data,results,db}` and mounting them automatically.
+The helper script `scripts/run_loreon.sh` runs the containerised pipeline directly from a shell, creating `~/Documents/loreon/{data,results,db}` and mounting them automatically.
 
 ---
 
 ## Building Distributables
 
-Platform build scripts are included:
+The build scripts are in the `scripts` folder. They can be started from any folder and write their output to `dist/` in the root of the repository:
 
 | Script | Target |
 |--------|--------|
@@ -543,28 +543,33 @@ Enable `--debug` for exact commands, processed paths and detailed per-step outpu
 
 ## Project Structure
 
-| File | Role |
+The application is in `sources/`: the Python scripts and the files they use at run time, laid out as in an installed copy. The scripts that build the installers are in `scripts/`.
+
+| Path | Role |
 |------|------|
-| `pipeline_gui.py` | PyQt5 graphical interface (entry point). |
-| `pipeline_worker.py` | Background thread that runs the pipeline / report as subprocesses (native or Docker). |
-| `metaGenomics_new.py` | Core pipeline orchestrator and CLI. |
-| `OtuUtils.py` | Filtering, mapping and tabulation utilities. |
-| `ResultsReader.py` | DuckDB-based OTU aggregation. |
-| `report_generator.py` | Interactive HTML report generator (uses `template.html`). |
-| `pipeline_profiler.py` | Per-step performance profiling. |
-| `PipelineLogger.py` | Logging helpers. |
-| `venv_manager.py` | Virtual-environment discovery/creation. |
-| `fileorganizer.py` | Barcode-folder organizer utility. |
-| `Dockerfile` | Container image for the containerised pipeline. |
-| `template.html` | Jinja2 template for the HTML report. |
-| `requirements.txt` | Python dependencies. |
-| `environment.yml` | Conda environment with pinned Python, PyQt, minimap2 and samtools. |
-| `example_data/` | Example dataset with its expected OTU table. |
+| `sources/pipeline_gui.py` | PyQt5 graphical interface (entry point). |
+| `sources/pipeline_worker.py` | Background thread that runs the pipeline / report as subprocesses (native or Docker). |
+| `sources/metaGenomics_new.py` | Core pipeline orchestrator and CLI. |
+| `sources/OtuUtils.py` | Filtering, mapping and tabulation utilities. |
+| `sources/ResultsReader.py` | DuckDB-based OTU aggregation. |
+| `sources/report_generator.py` | Interactive HTML report generator (uses `template.html`). |
+| `sources/pipeline_profiler.py` | Per-step performance profiling. |
+| `sources/PipelineLogger.py` | Logging helpers. |
+| `sources/venv_manager.py` | Virtual-environment discovery/creation. |
+| `sources/fileorganizer.py` | Barcode-folder organizer utility. |
+| `sources/Dockerfile` | Container image for the containerised pipeline. |
+| `sources/template.html` | Jinja2 template for the HTML report. |
+| `sources/requirements.txt` | Python dependencies. |
+| `sources/environment.yml` | Conda environment with pinned Python, PyQt, minimap2 and samtools. |
+| `sources/example_data/` | Example dataset with its expected OTU table. |
+| `scripts/` | Build scripts of the installers, `launch_gui.bat` and `run_loreon.sh`. |
 | `installers/` | Download page of the pre-built installers, with their checksums. |
 | `CHANGELOG.md` | Changes between versions. |
 | `tests/` | Automated tests (`pytest`). |
 
 ### Running the tests
+
+From the root of the repository:
 
 ```bash
 pip install pytest

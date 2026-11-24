@@ -7,7 +7,7 @@ import subprocess
 import pytest
 
 import OtuUtils
-from helpers import REPO_ROOT, run_cli
+from helpers import REPO_ROOT, SCRIPTS_DIR, SOURCES_DIR, run_cli
 
 GPL3_SHA256 = '3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986'
 
@@ -23,7 +23,7 @@ def test_licence_file_is_the_gnu_gpl_version_3():
 
 def test_licence_is_declared_consistently():
     assert re.search(r'^license: GPL-3\.0-only$', read('CITATION.cff'), re.MULTILINE)
-    for name in ('README.md', 'credits.md'):
+    for name in ('README.md', 'sources/credits.md'):
         text = read(name)
         assert 'GNU General Public License' in text, name
         assert 'affero' not in text.lower(), name
@@ -36,9 +36,9 @@ def test_version_has_three_numbers():
 def test_version_is_the_same_in_every_file_that_states_it():
     version = OtuUtils.LOREON_VERSION
     assert f'version: "{version}"' in read('CITATION.cff')
-    assert f'#define AppVersion   "{version}"' in read('installer.iss')
-    assert f'APP_VERSION="{version}"' in read('build_deb.sh')
-    assert f'APP_VERSION="{version}"' in read('build_dmg.sh')
+    assert f'#define AppVersion   "{version}"' in read('scripts/installer.iss')
+    assert f'APP_VERSION="{version}"' in read('scripts/build_deb.sh')
+    assert f'APP_VERSION="{version}"' in read('scripts/build_dmg.sh')
     readme = read('README.md')
     assert f'(v{version})' in readme
     assert 'version   = {' + version + '}' in readme
@@ -67,7 +67,7 @@ def test_no_installer_binaries_are_versioned():
 
 
 def test_debian_package_states_the_same_licence():
-    script = read('build_deb.sh')
+    script = read('scripts/build_deb.sh')
     assert 'License: MIT' not in script
     assert 'License: GPL-3' in script
     assert '/usr/share/common-licenses/GPL-3' in script
@@ -76,19 +76,19 @@ def test_debian_package_states_the_same_licence():
 @pytest.mark.parametrize('script', ['build_exe.bat', 'build_mac.sh', 'build_linux.sh',
                                     'build_deb.sh', 'build_dmg.sh'])
 def test_every_package_ships_the_licence_text(script):
-    lines = [line for line in read(script).splitlines()
+    lines = [line for line in read(f'scripts/{script}').splitlines()
              if 'LICENSE' in line and not line.lstrip().startswith(('#', 'REM', '::'))]
     assert lines, script
 
 
 def test_windows_installer_does_not_install_python_packages():
-    script = read('installer.iss')
+    script = read('scripts/installer.iss')
     assert 'pip install' not in script
     assert 'Python' not in script.split('[Code]')[1]
 
 
 def test_macos_bundle_is_signed_after_its_last_change():
-    lines = read('build_dmg.sh').splitlines()
+    lines = read('scripts/build_dmg.sh').splitlines()
     changes = [number for number, line in enumerate(lines)
                if 'PlistBuddy' in line or '"$BUNDLE_DIR/"' in line]
     signing = [number for number, line in enumerate(lines) if line.lstrip().startswith('codesign --force')]
@@ -98,7 +98,7 @@ def test_macos_bundle_is_signed_after_its_last_change():
 
 
 def test_debian_package_installs_executable_commands():
-    lines = read('build_deb.sh').splitlines()
+    lines = read('scripts/build_deb.sh').splitlines()
     reset = max(number for number, line in enumerate(lines) if 'chmod 644' in line)
     for command in ('loreon', 'loreon-cli'):
         granted = [number for number, line in enumerate(lines)
@@ -107,7 +107,7 @@ def test_debian_package_installs_executable_commands():
 
 
 def test_debian_command_line_uses_the_environment_of_the_application():
-    script = read('build_deb.sh')
+    script = read('scripts/build_deb.sh')
     assert 'ln -sf /opt/loreon/metaGenomics_new.py' not in script
     assert "<< 'CLIWRAPPER'" in script
     wrapper = script.split("<< 'CLIWRAPPER'")[1].split('\nCLIWRAPPER')[0]
@@ -130,3 +130,56 @@ def test_checksums_are_those_of_installers_listed_in_the_download_page():
     for digest, name in entries:
         assert re.fullmatch(r'[0-9a-f]{64}', digest), name
         assert version in name and name in page, name
+
+
+def test_root_of_the_repository_holds_no_program_or_setup_script():
+    if shutil.which('git') is None or not (REPO_ROOT / '.git').exists():
+        pytest.skip('not a git checkout')
+    tracked = subprocess.run(['git', 'ls-files'], cwd=REPO_ROOT, capture_output=True, text=True,
+                             check=True).stdout.splitlines()
+    in_root = [name for name in tracked if '/' not in name and (REPO_ROOT / name).exists()]
+    assert [name for name in in_root if name.endswith(('.py', '.sh', '.bat', '.command', '.iss', '.spec'))] == []
+
+
+def test_application_folder_holds_what_the_program_loads_at_run_time():
+    for name in ('pipeline_gui.py', 'metaGenomics_new.py', 'report_generator.py', 'template.html',
+                 'requirements.txt', 'environment.yml', 'Dockerfile', 'credits.md', 'loreon.jpeg',
+                 'loreon_app_icon_2.png'):
+        assert (SOURCES_DIR / name).is_file(), name
+    assert OtuUtils.EXAMPLE_DIR == SOURCES_DIR / 'example_data'
+    assert OtuUtils.EXAMPLE_DATABASE.is_file()
+
+
+SOURCE_FILE_REFERENCE = re.compile(r'(?:\$SRC/|sources[\\/])([A-Za-z0-9_.-]+)')
+
+
+@pytest.mark.parametrize('script', ['build_deb.sh', 'build_dmg.sh', 'build_linux.sh', 'build_mac.sh',
+                                    'build_exe.bat', 'build_installer.bat', 'installer.iss'])
+def test_setup_scripts_refer_to_application_files_that_exist(script):
+    text = read(f'scripts/{script}')
+    names = set(SOURCE_FILE_REFERENCE.findall(text))
+    listed = re.search(r'DATA_FILES=\((.*?)\n\)', text, re.DOTALL)
+    if listed:
+        names.update(listed.group(1).split())
+    assert names
+    assert sorted(name for name in names if not (SOURCES_DIR / name).exists()) == []
+
+
+@pytest.mark.parametrize('script, change_of_folder', [
+    ('build_deb.sh', 'cd "$(dirname "$0")/.."'),
+    ('build_dmg.sh', 'cd "$(dirname "$0")/.."'),
+    ('build_linux.sh', 'cd "$(dirname "$0")/.."'),
+    ('build_mac.sh', 'cd "$(dirname "$0")/.."'),
+    ('build_exe.bat', 'cd /d "%~dp0.."'),
+    ('build_installer.bat', 'cd /d "%~dp0.."'),
+    ('launch_gui.bat', 'cd /d "%~dp0..\\sources"'),
+])
+def test_setup_scripts_work_from_the_folder_they_expect(script, change_of_folder):
+    assert change_of_folder in read(f'scripts/{script}')
+
+
+def test_windows_installer_script_reaches_the_root_of_the_repository():
+    script = read('scripts/installer.iss')
+    assert 'Source: "..\\dist\\LOREON\\*"' in script
+    assert 'OutputDir=..\\windows_setup' in script
+    assert (SCRIPTS_DIR / 'installer.iss').is_file()

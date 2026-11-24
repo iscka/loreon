@@ -9,11 +9,11 @@
 #   - PyQt5 system libraries:
 #       sudo apt install python3-pyqt5 libxcb-xinerama0 libxcb-cursor0
 #   - All project Python dependencies:
-#       pip install -r requirements.txt
+#       pip install -r sources/requirements.txt
 #
 # Usage:
-#   chmod +x build_linux.sh
-#   ./build_linux.sh
+#   chmod +x scripts/build_linux.sh
+#   scripts/build_linux.sh
 #
 # End-user installation:
 #   tar -xzf LOREON_linux.tar.gz
@@ -24,17 +24,20 @@
 # =============================================================================
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
+
+# Folder of the application files, relative to the root of the repository
+SRC="sources"
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 info()  { echo "[INFO]  $*"; }
 error() { echo "[ERROR] $*" >&2; exit 1; }
 
 # ── Checks ───────────────────────────────────────────────────────────────────
-[ -f "pipeline_gui.py" ]        || error "pipeline_gui.py not found."
-[ -f "loreon_app_icon_2.png" ]  || error "loreon_app_icon_2.png not found."
-[ -f "loreon.jpeg" ]            || error "loreon.jpeg not found."
-[ -f "credits.md" ]             || error "credits.md not found."
+[ -f "$SRC/pipeline_gui.py" ]        || error "$SRC/pipeline_gui.py not found."
+[ -f "$SRC/loreon_app_icon_2.png" ]  || error "$SRC/loreon_app_icon_2.png not found."
+[ -f "$SRC/loreon.jpeg" ]            || error "$SRC/loreon.jpeg not found."
+[ -f "$SRC/credits.md" ]             || error "$SRC/credits.md not found."
 
 # ── Install build tools ───────────────────────────────────────────────────────
 info "Installing PyInstaller..."
@@ -52,29 +55,30 @@ python3 -m PyInstaller \
     --hidden-import=encodings.utf_8 \
     --hidden-import=encodings.ascii \
     --collect-all=PyQt5 \
+    --paths "$SRC" \
     --clean \
     -y \
-    pipeline_gui.py
+    "$SRC/pipeline_gui.py"
 
 # ── Copy data files ───────────────────────────────────────────────────────────
 DEST="dist/LOREON"
 info "Copying data files into $DEST ..."
 
-cp Dockerfile              "$DEST/"
-cp requirements.txt        "$DEST/"
-cp loreon_app_icon_2.png   "$DEST/"
-cp loreon.jpeg             "$DEST/"
-cp credits.md              "$DEST/"
+cp "$SRC/Dockerfile"              "$DEST/"
+cp "$SRC/requirements.txt"        "$DEST/"
+cp "$SRC/loreon_app_icon_2.png"   "$DEST/"
+cp "$SRC/loreon.jpeg"             "$DEST/"
+cp "$SRC/credits.md"              "$DEST/"
 cp LICENSE                 "$DEST/"
-cp metaGenomics_new.py     "$DEST/"
-cp OtuUtils.py             "$DEST/"
-cp ResultsReader.py        "$DEST/"
-cp PipelineLogger.py       "$DEST/"
-cp report_generator.py     "$DEST/"
-cp pipeline_profiler.py    "$DEST/"
-cp template.html           "$DEST/"
-cp -R example_data         "$DEST/"
-[ -f .dockerignore ] && cp .dockerignore "$DEST/"
+cp "$SRC/metaGenomics_new.py"     "$DEST/"
+cp "$SRC/OtuUtils.py"             "$DEST/"
+cp "$SRC/ResultsReader.py"        "$DEST/"
+cp "$SRC/PipelineLogger.py"       "$DEST/"
+cp "$SRC/report_generator.py"     "$DEST/"
+cp "$SRC/pipeline_profiler.py"    "$DEST/"
+cp "$SRC/template.html"           "$DEST/"
+cp -R "$SRC/example_data"       "$DEST/"
+[ -f "$SRC/.dockerignore" ] && cp "$SRC/.dockerignore" "$DEST/"
 
 # ── Launcher shell script ─────────────────────────────────────────────────────
 info "Creating launcher script..."

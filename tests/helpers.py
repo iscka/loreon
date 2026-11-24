@@ -10,6 +10,8 @@ import textwrap
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+SOURCES_DIR = REPO_ROOT / 'sources'
+SCRIPTS_DIR = REPO_ROOT / 'scripts'
 HAVE_TOOLS = shutil.which('minimap2') is not None and shutil.which('samtools') is not None
 SYSTEM_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
 
@@ -119,15 +121,15 @@ def run_guarded(args, timeout, env=None, cwd=None):
 
 
 def run_python(code, timeout, env=None):
-    """Run a Python snippet with the repository on the import path."""
+    """Run a Python snippet with the application folder on the import path."""
     full_env = dict(os.environ if env is None else env)
-    full_env['PYTHONPATH'] = str(REPO_ROOT)
+    full_env['PYTHONPATH'] = str(SOURCES_DIR)
     return run_guarded([sys.executable, '-c', textwrap.dedent(code)], timeout=timeout, env=full_env)
 
 
 def run_cli(arguments, timeout, env=None):
     """Run the command-line pipeline and return (returncode, output, hung)."""
-    command = [sys.executable, str(REPO_ROOT / 'metaGenomics_new.py')] + [str(a) for a in arguments]
+    command = [sys.executable, str(SOURCES_DIR / 'metaGenomics_new.py')] + [str(a) for a in arguments]
     return run_guarded(command, timeout=timeout, env=env)
 
 

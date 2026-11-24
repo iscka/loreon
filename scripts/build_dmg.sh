@@ -10,7 +10,7 @@
 #
 # Requirements (on the build machine):
 #   - Python 3.8+  with pip
-#   - PyQt5 and all project dependencies (pip install -r requirements.txt)
+#   - PyQt5 and all project dependencies (pip install -r sources/requirements.txt)
 #   - Xcode Command Line Tools  (for sips / iconutil / hdiutil)
 #
 # Runtime dependencies (user must install separately):
@@ -18,8 +18,8 @@
 #   - samtools  (brew install samtools  OR  conda install -c bioconda samtools)
 #
 # Usage:
-#   chmod +x build_dmg.sh
-#   ./build_dmg.sh
+#   chmod +x scripts/build_dmg.sh
+#   scripts/build_dmg.sh
 #
 # Gatekeeper note:
 #   The .app is signed ad hoc and is not notarized by Apple. macOS blocks the
@@ -29,7 +29,7 @@
 # =============================================================================
 
 set -e
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="LOREON"
@@ -38,6 +38,9 @@ BUNDLE_ID="com.loreon.pipeline"
 DMG_NAME="${APP_NAME}-${APP_VERSION}-macOS.dmg"
 DMG_VOLNAME="${APP_NAME} ${APP_VERSION}"
 
+# Folder of the application files, relative to the root of the repository
+SRC="sources"
+
 # Files to bundle inside the .app
 DATA_FILES=(
     Dockerfile
@@ -45,7 +48,6 @@ DATA_FILES=(
     loreon_app_icon_2.png
     loreon.jpeg
     credits.md
-    LICENSE
     metaGenomics_new.py
     OtuUtils.py
     ResultsReader.py
@@ -66,11 +68,11 @@ error()   { printf "\033[1;31m[ERROR]\033[0m %s\n" "$*" >&2; exit 1; }
 
 # ── Pre-flight checks ───────────────────────────────────────────────────────
 info "Checking required files..."
-[ -f "pipeline_gui.py" ]        || error "pipeline_gui.py not found."
-[ -f "loreon_app_icon_2.png" ]  || error "loreon_app_icon_2.png not found."
-[ -f "loreon.jpeg" ]            || error "loreon.jpeg not found."
-[ -f "credits.md" ]             || error "credits.md not found."
-[ -f "template.html" ]          || error "template.html not found."
+[ -f "$SRC/pipeline_gui.py" ]        || error "$SRC/pipeline_gui.py not found."
+[ -f "$SRC/loreon_app_icon_2.png" ]  || error "$SRC/loreon_app_icon_2.png not found."
+[ -f "$SRC/loreon.jpeg" ]            || error "$SRC/loreon.jpeg not found."
+[ -f "$SRC/credits.md" ]             || error "$SRC/credits.md not found."
+[ -f "$SRC/template.html" ]          || error "$SRC/template.html not found."
 
 # Check build tools
 command -v python3   >/dev/null || error "python3 not found in PATH."
@@ -94,14 +96,14 @@ rm -rf "$ICONSET"
 mkdir "$ICONSET"
 
 for SIZE in 16 32 64 128 256 512; do
-    sips -z $SIZE $SIZE loreon_app_icon_2.png --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null 2>&1
+    sips -z $SIZE $SIZE "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null 2>&1
 done
 # Retina variants
-sips -z 32   32   loreon_app_icon_2.png --out "$ICONSET/icon_16x16@2x.png"    >/dev/null 2>&1
-sips -z 64   64   loreon_app_icon_2.png --out "$ICONSET/icon_32x32@2x.png"    >/dev/null 2>&1
-sips -z 256  256  loreon_app_icon_2.png --out "$ICONSET/icon_128x128@2x.png"  >/dev/null 2>&1
-sips -z 512  512  loreon_app_icon_2.png --out "$ICONSET/icon_256x256@2x.png"  >/dev/null 2>&1
-sips -z 1024 1024 loreon_app_icon_2.png --out "$ICONSET/icon_512x512@2x.png"  >/dev/null 2>&1
+sips -z 32   32   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_16x16@2x.png"    >/dev/null 2>&1
+sips -z 64   64   "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_32x32@2x.png"    >/dev/null 2>&1
+sips -z 256  256  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_128x128@2x.png"  >/dev/null 2>&1
+sips -z 512  512  "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_256x256@2x.png"  >/dev/null 2>&1
+sips -z 1024 1024 "$SRC/loreon_app_icon_2.png" --out "$ICONSET/icon_512x512@2x.png"  >/dev/null 2>&1
 
 ICNS_FILE="${APP_NAME}_build.icns"
 iconutil -c icns "$ICONSET" -o "$ICNS_FILE"
@@ -123,9 +125,10 @@ python3 -m PyInstaller \
     --hidden-import=encodings.latin_1 \
     --collect-all=PyQt5 \
     --hidden-import=venv_manager \
+    --paths "$SRC" \
     --clean \
     -y \
-    pipeline_gui.py
+    "$SRC/pipeline_gui.py"
 
 success "PyInstaller build complete."
 
@@ -148,14 +151,15 @@ BUNDLE_DIR="dist/${APP_NAME}.app/Contents/MacOS"
 info "Copying data files into ${APP_NAME}.app bundle..."
 
 for f in "${DATA_FILES[@]}"; do
-    if [ -f "$f" ]; then
-        cp "$f" "$BUNDLE_DIR/"
+    if [ -f "$SRC/$f" ]; then
+        cp "$SRC/$f" "$BUNDLE_DIR/"
     else
-        warn "File not found, skipping: $f"
+        warn "File not found, skipping: $SRC/$f"
     fi
 done
-[ -d example_data ] && cp -R example_data "$BUNDLE_DIR/"
-[ -f .dockerignore ] && cp .dockerignore "$BUNDLE_DIR/"
+cp LICENSE "$BUNDLE_DIR/"
+[ -d "$SRC/example_data" ] && cp -R "$SRC/example_data" "$BUNDLE_DIR/"
+[ -f "$SRC/.dockerignore" ] && cp "$SRC/.dockerignore" "$BUNDLE_DIR/"
 
 success "Data files copied."
 

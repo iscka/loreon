@@ -24,9 +24,9 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 AllowNoIcons=yes
 
-OutputDir=windows_setup
+OutputDir=..\windows_setup
 OutputBaseFilename=LOREON_Setup_{#AppVersion}
-SetupIconFile=loreon_app_icon_2.ico
+SetupIconFile=..\sources\loreon_app_icon_2.ico
 UninstallDisplayIcon={app}\loreon_app_icon_2.ico
 
 Compression=lzma2/ultra64
@@ -52,8 +52,8 @@ Name: "startupicon";  Description: "Avvia LOREON con Windows";               Gro
 
 ; ── Files ────────────────────────────────────────────────────
 [Files]
-; Tutto il contenuto della directory dist\LOREON\
-Source: "dist\LOREON\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Tutto il contenuto della directory dist\LOREON\, nella radice del repository
+Source: "..\dist\LOREON\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 ; ── Icons ────────────────────────────────────────────────────
 [Icons]

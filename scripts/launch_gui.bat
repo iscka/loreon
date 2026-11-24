@@ -21,8 +21,8 @@ if errorlevel 1 (
     )
 )
 
-:: Launch GUI from its own directory
-cd /d "%~dp0"
+:: Launch GUI from the sources folder
+cd /d "%~dp0..\sources"
 python pipeline_gui.py
 
 endlocal
