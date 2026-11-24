@@ -197,7 +197,7 @@ Launch with `python pipeline_gui.py`. The window is organised into numbered grou
    - **Delete BAM/SAM after analysis** — frees disk space.
    - **Retain unmapped reads** — saves the reads that are not counted, one FASTQ file per sample (see [Reads that are not counted](#reads-that-are-not-counted)).
    - **Flat SH (UNITE only)** — collapses reference accessions sharing the same UNITE Species Hypothesis.
-   - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default.
+   - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default: read the caution in [Alignment-quality filters](#alignment-quality-filters) before setting them.
 3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs, and optionally a maximum time per sample.
 4. **Docker (required on Windows)** — enable Docker mode, **Check Image** and **Build Image** (first run only).
 5. **START PIPELINE / RUN EXAMPLE DATASET / STOP** — run the analysis of the form, run the [example dataset](#example-dataset), or terminate the pipeline. In Docker mode **STOP** also stops the container.
@@ -248,7 +248,26 @@ Without `-min`, `-max` and `--preset` no length filter is applied. After the fil
 
 `L` is the read length without soft-clipped bases and `NM` is the edit distance reported by minimap2. Both values are computed by LOREON while it counts the alignments, so the result is the same with every supported samtools version. Unmapped, secondary and supplementary alignments are always left out.
 
-Reads that are longer than the reference sequences (for example ITS–LSU amplicons mapped on an ITS-only database) align over a fraction of their length only: a read-coverage threshold then removes most of them. The published analyses were run with both filters disabled.
+> **Use these two filters with caution.** With Oxford Nanopore reads, a threshold greater than 0 can discard a large part of the reads of a sample, or all of them. Both filters are disabled by default and the published analyses were run without them. Set a threshold only for a known reason, and after measuring its effect on a control.
+
+How many reads a threshold removes depends on the data as much as on the organisms:
+
+- **Identity** follows the accuracy of the reads, hence the flow cell, the kit and the basecalling model, and the distance between the organism and its closest reference. The thresholds in use for short reads, such as 97 %, remove a large share of nanopore reads even with recent chemistries.
+- **Read coverage** counts every base of the read that is not aligned. Adapters and barcodes left on the reads, about 100 bases at the start of each read in the two runs below, and references shorter than the amplicon, as for ITS–LSU amplicons mapped on an ITS-only database, keep it low whatever the accuracy of the reads.
+
+Share of the mapped reads that each threshold removes, measured on two sets of yeast mock communities:
+
+| Threshold | MinION run of 2021, ITS–LSU amplicons on UNITE | R10.4.1 run of 2025, high-accuracy basecalling, on Eukaryome |
+|-----------|-----------------------------------------------|---------------------------------------------------------------|
+| Identity ≥ 90 % | 49 % | 4 % |
+| Identity ≥ 95 % | 77 % | 15 % |
+| Identity ≥ 97 % | 93 % | 29 % |
+| Read coverage ≥ 50 % | 71 % | 46 % |
+| Read coverage ≥ 80 % | 92 % | 99 % |
+
+A sample whose organisms are all in the database, such as a pure culture, is not exempt. In the same runs the reads assigned to a species of the mock lost 12–32 % (2021) and 1–4 % (2025) at 90 % identity, 48–68 % and 6–13 % at 95 %, and 96–100 % at 80 % read coverage.
+
+A pure culture or a mock community is the right control. Analyse it with the candidate threshold, sequenced and basecalled like the samples, and read the *Quality Retention (%)* column of the report: it is the share of mapped reads that the thresholds keep. A read-coverage threshold also needs reads without adapters and barcodes and references that span the whole amplicon. With `--retain-unmapped` the reads removed by the thresholds are saved in `below_threshold_seq/` and can be examined.
 
 ### Performance
 
