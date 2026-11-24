@@ -229,6 +229,43 @@ def generate_mapping_table_html(mapping_data):
     )
 
 
+def generate_retained_reads(mapping_data):
+    """Describe the files written by the option "Retain unmapped reads".
+
+    Returns None when the option was not used. Otherwise returns the total
+    number of reads saved in each kind of file and a per-sample HTML table
+    with the number of reads and the path of every file, relative to the
+    output folder of the run.
+    """
+    params = mapping_data.get('parameters', {})
+    samples_list = mapping_data.get('samples', [])
+    if not params.get('retain_unmapped') or not samples_list:
+        return None
+    quality_filter_active = params.get('min_percent_identity', 0) > 0 or params.get('min_ref_coverage', 0) > 0
+    rows = []
+    for sample in samples_list:
+        row = {
+            'Sample': sample.get('sample', ''),
+            'Unmapped Reads': sample.get('unmapped_saved', 0),
+            'Unmapped Reads File': sample.get('unmapped_file') or 'no file',
+        }
+        if quality_filter_active:
+            row['Reads Below Thresholds'] = sample.get('below_threshold_saved', 0)
+            row['Reads Below Thresholds File'] = sample.get('below_threshold_file') or 'no file'
+        rows.append(row)
+    below_total = None
+    if quality_filter_active:
+        below_total = f"{sum(row['Reads Below Thresholds'] for row in rows):,}"
+    return {
+        'unmapped_total': f"{sum(row['Unmapped Reads'] for row in rows):,}",
+        'below_total': below_total,
+        'table_html': pd.DataFrame(rows).to_html(
+            classes="table table-striped table-hover table-sm",
+            index=False, border=0
+        ),
+    }
+
+
 def load_data(filter_path, otu_path):
     print(f"Loading filter data from: {filter_path}")
     fp = Path(filter_path)
@@ -554,8 +591,9 @@ def main():
     if mapping_data:
         graph_mapping_div, graph_quality_div = generate_mapping_graphs(mapping_data)
         table_mapping_html = generate_mapping_table_html(mapping_data)
+        retained_reads = generate_retained_reads(mapping_data)
     else:
-        graph_mapping_div = graph_quality_div = table_mapping_html = None
+        graph_mapping_div = graph_quality_div = table_mapping_html = retained_reads = None
 
     print("Converting tables to HTML...")
     table_filter_html = df_filter.to_html(
@@ -616,6 +654,7 @@ def main():
         "graph_mapping_div": graph_mapping_div,
         "graph_quality_div": graph_quality_div,
         "table_mapping_html": table_mapping_html,
+        "retained_reads": retained_reads,
         "analysis_params": analysis_params,
     }
 

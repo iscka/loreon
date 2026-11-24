@@ -32,7 +32,7 @@ cd "$(dirname "$0")"
 
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="LOREON"
-APP_VERSION="1.1.0"
+APP_VERSION="1.1.1"
 BUNDLE_ID="com.loreon.pipeline"
 DMG_NAME="${APP_NAME}-${APP_VERSION}-macOS.dmg"
 DMG_VOLNAME="${APP_NAME} ${APP_VERSION}"

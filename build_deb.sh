@@ -42,7 +42,7 @@ cd "$(dirname "$0")"
 # ── Configuration ────────────────────────────────────────────────────────────
 APP_NAME="loreon"
 APP_NAME_DISPLAY="LOREON"
-APP_VERSION="1.1.0"
+APP_VERSION="1.1.1"
 ARCH="amd64"
 DEB_NAME="${APP_NAME}_${APP_VERSION}_${ARCH}.deb"
 INSTALL_PREFIX="/opt/loreon"

@@ -4,7 +4,7 @@
 ; ============================================================
 
 #define AppName      "LOREON"
-#define AppVersion   "1.1.0"
+#define AppVersion   "1.1.1"
 #define AppPublisher "University of Perugia"
 #define AppURL       "https://github.com/iscka/loreon"
 #define AppExeName   "LOREON.exe"

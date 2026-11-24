@@ -1,3 +1,4 @@
+import contextlib
 import csv
 import statistics
 import random
@@ -17,7 +18,7 @@ try:
 except ImportError:
     import gzip
 
-LOREON_VERSION = "1.1.0"
+LOREON_VERSION = "1.1.1"
 
 
 def _application_dir():
@@ -573,6 +574,9 @@ _BROKEN_PIPE_EXIT = -getattr(signal, 'SIGPIPE', 13)
 _CIGAR_OPERATION = re.compile(rb'(\d+)([MIDNSHP=X])')
 _SOFT_CLIP_HEAD = re.compile(rb'(?:\d+H)?(\d+)S')
 _SOFT_CLIP_TAIL = re.compile(rb'(\d+)S(?:\d+H)?$')
+_COMPLEMENT = bytes.maketrans(b'ACGTURYKMBVDHacgturykmbvdh', b'TGCAAYRMKVBHDtgcaayrmkvbhd')
+UNMAPPED_DIR = 'unmapped_seq'
+BELOW_THRESHOLD_DIR = 'below_threshold_seq'
 
 
 class _TimeLimit:
@@ -846,13 +850,35 @@ def passes_quality_filter(aligned_length, query_length, edit_distance,
     return True
 
 
-def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, sink=None):
+def _fastq_record(fields, flag):
+    """Return a SAM record as a FASTQ record, with the read as it was sequenced.
+
+    The sequence and the qualities of a read aligned on the reverse strand
+    are turned back; a record stored without qualities gets a constant one.
+    """
+    sequence = fields[9]
+    quality = fields[10].rstrip(b'\r\n')
+    if quality == b'*':
+        quality = b'I' * len(sequence)
+    if flag & 0x10:
+        sequence = sequence.translate(_COMPLEMENT)[::-1]
+        quality = quality[::-1]
+    return b'@' + fields[0] + b'\n' + sequence + b'\n+\n' + quality + b'\n'
+
+
+def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, sink=None,
+                        unmapped=None, below_threshold=None):
     """Count the primary alignments of a SAM stream per reference.
 
     lines yields SAM lines as bytes, header first. Secondary and
     supplementary records are skipped. Mapped reads that pass the identity
     and read-coverage thresholds are counted; when sink is given, the header
     and the records that pass are written to it unchanged.
+
+    The reads that are not counted can be kept: when unmapped is given, the
+    reads that do not align are written to it as FASTQ records; when
+    below_threshold is given, the mapped reads that fail a threshold are
+    written to it in the same way.
 
     Returns a dict with the references in header order, the counts per
     reference, and the numbers of primary, mapped and passing reads.
@@ -862,6 +888,8 @@ def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, s
     total = mapped = passed = 0
     filtering = min_percent_identity > 0.0 or min_ref_coverage > 0.0
     write = sink.write if sink is not None else None
+    keep_unmapped = unmapped.write if unmapped is not None else None
+    keep_below = below_threshold.write if below_threshold is not None else None
     in_header = True
 
     for line in lines:
@@ -890,6 +918,8 @@ def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, s
             continue
         total += 1
         if flag & 0x4:
+            if keep_unmapped is not None:
+                keep_unmapped(_fastq_record(fields, flag))
             continue
         mapped += 1
 
@@ -900,6 +930,8 @@ def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, s
             edit_distance = _edit_distance(fields[11]) if len(fields) > 11 else None
             if not passes_quality_filter(aligned_query_length(cigar, query_length), query_length,
                                          edit_distance, min_percent_identity, min_ref_coverage):
+                if keep_below is not None:
+                    keep_below(_fastq_record(fields, flag))
                 continue
 
         passed += 1
@@ -920,9 +952,29 @@ def tabulate_sam_stream(lines, min_percent_identity=0.0, min_ref_coverage=0.0, s
     }
 
 
+def _open_reads_file(path, compressed):
+    if compressed:
+        return gzip.open(path, 'wb', compresslevel=3)
+    return open(path, 'wb', buffering=1_048_576)
+
+
+def _kept_reads_file(path, reads, base_dir):
+    """Return the name of a file of retained reads relative to the output folder.
+
+    A file that received no read is removed and None is returned.
+    """
+    if path is None:
+        return None
+    if reads == 0:
+        _remove_quietly(path)
+        return None
+    return path.relative_to(base_dir).as_posix()
+
+
 def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                       min_percent_identity: float = 0.0, min_ref_coverage: float = 0.0,
-                      delete_bam: bool = False, timeout_s: float = None):
+                      delete_bam: bool = False, timeout_s: float = None,
+                      retain_unmapped: bool = False, gzip_output: bool = False):
     """Count the primary alignments of one sample per reference.
 
     The sorted BAM written by mapping_improved is read once. Unmapped,
@@ -932,11 +984,18 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
     filter-expression support of the installed samtools. The alignments
     that pass are also written to <sample>_sorted_filtered.bam.
 
+    With retain_unmapped the reads that are not counted are saved as FASTQ,
+    one file per sample: the reads that do not align in unmapped_seq/ and,
+    when a threshold is set, the mapped reads that fail it in
+    below_threshold_seq/. gzip_output compresses the two files. The files
+    that an earlier run left for the same sample are removed first.
+
     Returns the mapping statistics of the sample, or None when a tool
     fails, is missing, or exceeds timeout_s seconds.
     """
     fname = "unknown"
     filtered_sorted_bam = None
+    unmapped_file = below_file = None
     input_bam = samfile
 
     try:
@@ -953,6 +1012,17 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
 
         filtered_sorted_bam = tab_dir / f"{fname}_sorted_filtered.bam"
         results_file = results_dir / f"{fname}.tmp.txt"
+
+        if retain_unmapped:
+            for folder in (UNMAPPED_DIR, BELOW_THRESHOLD_DIR):
+                for suffix in ('.fastq', '.fastq.gz'):
+                    _remove_quietly(base_dir / folder / (fname + suffix))
+            reads_name = fname + ('.fastq.gz' if gzip_output else '.fastq')
+            unmapped_file = base_dir / UNMAPPED_DIR / reads_name
+            unmapped_file.parent.mkdir(parents=True, exist_ok=True)
+            if min_percent_identity > 0.0 or min_ref_coverage > 0.0:
+                below_file = base_dir / BELOW_THRESHOLD_DIR / reads_name
+                below_file.parent.mkdir(parents=True, exist_ok=True)
 
         thread_str = str(threads)
 
@@ -1004,8 +1074,15 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                 processes.append(proc_write)
                 limit = _TimeLimit(timeout_s, processes)
                 try:
-                    counted = tabulate_sam_stream(proc_read.stdout, min_percent_identity,
-                                                  min_ref_coverage, sink=proc_write.stdin)
+                    with contextlib.ExitStack() as kept:
+                        unmapped_out = below_out = None
+                        if unmapped_file is not None:
+                            unmapped_out = kept.enter_context(_open_reads_file(unmapped_file, gzip_output))
+                        if below_file is not None:
+                            below_out = kept.enter_context(_open_reads_file(below_file, gzip_output))
+                        counted = tabulate_sam_stream(proc_read.stdout, min_percent_identity,
+                                                      min_ref_coverage, sink=proc_write.stdin,
+                                                      unmapped=unmapped_out, below_threshold=below_out)
                     proc_write.stdin.close()
                 except BrokenPipeError:
                     counted = None
@@ -1069,6 +1146,13 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
                 counted['mapped_reads'] / counted['total_reads'] * 100, 2
             )
         unmapped = counted['total_reads'] - counted['mapped_reads']
+
+        if retain_unmapped:
+            below = counted['mapped_reads'] - counted['passed_reads']
+            mapping_stats['unmapped_saved'] = unmapped
+            mapping_stats['unmapped_file'] = _kept_reads_file(unmapped_file, unmapped, base_dir)
+            mapping_stats['below_threshold_saved'] = below
+            mapping_stats['below_threshold_file'] = _kept_reads_file(below_file, below, base_dir)
 
         if debug:
             print(f"[{fname}] Pre-filter: total={counted['total_reads']}, "
@@ -1137,6 +1221,9 @@ def tabeling_improved(samfile: str, threads: int = 4, debug: bool = False,
     finally:
         if not completed:
             _remove_quietly(results_file)
+            for kept_file in (unmapped_file, below_file):
+                if kept_file is not None:
+                    _remove_quietly(kept_file)
         if not completed and filtered_sorted_bam is not None and not delete_bam:
             _remove_quietly(filtered_sorted_bam)
             _remove_quietly(f"{filtered_sorted_bam}.bai")

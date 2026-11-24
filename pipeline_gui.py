@@ -320,6 +320,15 @@ class MainWindow(QMainWindow):
             "to free disk space. The OTU results are NOT affected."
         )
         options_left_layout.addWidget(self.delete_bam_check)
+        self.retain_unmapped_check = QCheckBox("Retain unmapped reads")
+        self.retain_unmapped_check.setToolTip(
+            "Save the reads that are not counted, one FASTQ file per sample.\n"
+            "Reads that do not align go to the folder unmapped_seq.\n"
+            "If Min Identity or Min Read Cov is set, the aligned reads below\n"
+            "these thresholds go to the folder below_threshold_seq.\n"
+            "The HTML report lists the files. The OTU results are NOT affected."
+        )
+        options_left_layout.addWidget(self.retain_unmapped_check)
         self.flat_sh_check = QCheckBox("Flat SH (UNITE only)")
         self.flat_sh_check.setToolTip(
             "UNITE only: collapse reference accessions that share the same\n"
@@ -641,6 +650,7 @@ class MainWindow(QMainWindow):
             "force_tax_map": self.force_tax_map_check.isChecked(),
             "profile": self.profile_check.isChecked(),
             "delete_bam": self.delete_bam_check.isChecked(),
+            "retain_unmapped": self.retain_unmapped_check.isChecked(),
             "flat_sh": self.flat_sh_check.isChecked(),
             "use_docker": self.docker_check.isChecked(),
         }
@@ -887,7 +897,8 @@ class MainWindow(QMainWindow):
                        self.job_threads_input, self.kmer_input, self.window_input,
                        self.sample_timeout_input,
                        self.force_tax_map_check, self.profile_check,
-                       self.delete_bam_check, self.flat_sh_check, self.docker_check,
+                       self.delete_bam_check, self.retain_unmapped_check,
+                       self.flat_sh_check, self.docker_check,
                        self.docker_check_btn, self.docker_build_btn, self.example_btn]:
             widget.setEnabled(not is_running)
         if not is_running:

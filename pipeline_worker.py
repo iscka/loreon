@@ -137,6 +137,8 @@ class PipelineWorker(QObject):
             cmd.append("--profile")
         if self.settings.get("delete_bam", False):
             cmd.append("--delete-bam")
+        if self.settings.get("retain_unmapped", False):
+            cmd.append("--retain-unmapped")
         if self.settings.get("flat_sh", False):
             cmd.append("--flat-sh")
         return cmd

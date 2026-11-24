@@ -2,13 +2,13 @@ cff-version: 1.2.0
 message: "If you use this software, please cite it using the metadata from this file."
 type: software
 title: "LOREON: Long-Read ONT Metagenomic Pipeline"
-version: "1.1.0"
+version: "1.1.1"
 date-released: 2026-11-12
 doi: 10.5281/zenodo.22754395
 identifiers:
   - type: doi
     value: 10.5281/zenodo.22754395
-    description: "Zenodo archive of LOREON v1.1.0"
+    description: "Zenodo archive of LOREON v1.1.1"
 authors:
   - family-names: Scarponi
     given-names: Roberto

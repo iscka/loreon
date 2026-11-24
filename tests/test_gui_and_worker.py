@@ -108,6 +108,35 @@ def test_worker_passes_the_sample_time_limit_only_when_set(app):
     assert '--sample-timeout' not in worker._pipeline_args('in', 'out', 'db.fasta')
 
 
+def test_retain_unmapped_reads_is_one_checkbox_off_by_default(window):
+    assert window.retain_unmapped_check.text() == 'Retain unmapped reads'
+    assert not window.retain_unmapped_check.isChecked()
+    assert window.collect_settings()['retain_unmapped'] is False
+    window.retain_unmapped_check.setChecked(True)
+    assert window.collect_settings()['retain_unmapped'] is True
+
+
+def test_retain_unmapped_reads_cannot_be_changed_during_a_run(window):
+    window.set_running_state(True)
+    assert not window.retain_unmapped_check.isEnabled()
+    window.set_running_state(False)
+    assert window.retain_unmapped_check.isEnabled()
+
+
+def test_worker_passes_retain_unmapped_only_when_set(app):
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(retain_unmapped=True)
+    assert '--retain-unmapped' in worker._pipeline_args('in', 'out', 'db.fasta')
+    worker.settings = base_settings()
+    assert '--retain-unmapped' not in worker._pipeline_args('in', 'out', 'db.fasta')
+
+
+def test_docker_mode_receives_retain_unmapped_too(app):
+    worker = pipeline_worker.PipelineWorker()
+    worker.settings = base_settings(retain_unmapped=True, use_docker=True)
+    assert '--retain-unmapped' in worker._build_docker_pipeline_cmd()
+
+
 def test_each_container_gets_its_own_name(app):
     worker = pipeline_worker.PipelineWorker()
     worker.settings = base_settings(use_docker=True)

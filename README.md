@@ -195,6 +195,7 @@ Launch with `python pipeline_gui.py`. The window is organised into numbered grou
    - **Force Taxonomy Map Recreation** — ignores the cached taxonomy map.
    - **Enable Performance Profiling** — writes the profiling report.
    - **Delete BAM/SAM after analysis** — frees disk space.
+   - **Retain unmapped reads** — saves the reads that are not counted, one FASTQ file per sample (see [Reads that are not counted](#reads-that-are-not-counted)).
    - **Flat SH (UNITE only)** — collapses reference accessions sharing the same UNITE Species Hypothesis.
    - **Read & Alignment Filter** group — the **Length filter** menu offers *No length filter* (default), *Custom range* and the [amplicon presets](#amplicon-presets); **Scan read lengths...** reads a sample of the input folder and shows the length distribution, the share of reads each preset would keep and a window that can be applied with one click. **Min Identity (%)** and **Min Read Cov (%)** are disabled (0) by default.
 3. **Performance (threads)** — the group header shows the number of detected CPU cores; set total threads and threads-per-job, with a live hint for the resulting number of parallel jobs, and optionally a maximum time per sample.
@@ -272,6 +273,7 @@ Reads that are longer than the reference sequences (for example ITS–LSU amplic
 | `--debug` | Verbose output (shows exact commands and per-step detail). |
 | `--profile` | Enable performance profiling (JSON + Word report). |
 | `--delete-bam` | Delete BAM/SAM files after tabulation to save disk space. |
+| `--retain-unmapped` | Save the reads that are not counted, one FASTQ file per sample: reads that do not align in `unmapped_seq/` and, when an alignment-quality filter is set, aligned reads below the thresholds in `below_threshold_seq/` (see [Reads that are not counted](#reads-that-are-not-counted)). |
 | `--gzip-intermediate` | Write merged FASTQ intermediates as `.fastq.gz` (minimap2 reads gzip natively). |
 | `--example` | Analyse the [example dataset](#example-dataset) with the default settings and compare the result with its expected table. |
 | `--expected-table TSV` | After the run, compare the read counts of the OTU table with this table (a `.tsv` written by LOREON); exit status `1` if they differ. |
@@ -354,6 +356,8 @@ output_folder/
 │   └── results/                      # per-sample count tables (*.tmp.txt)
 ├── good_seq/                         # reads kept by the length filter (merged per sample)
 ├── bad_seq/                          # reads discarded by the length filter
+├── unmapped_seq/                     # reads that do not align (with --retain-unmapped)
+├── below_threshold_seq/              # aligned reads below the quality thresholds (with --retain-unmapped)
 ├── report_filtering_<min>_<max>.xlsx # length-filter statistics
 ├── mapping_stats.json                # per-sample mapping & quality-filter stats
 ├── OTU_Table_<name>_<db>.xlsx        # final OTU table with taxonomy
@@ -365,13 +369,26 @@ output_folder/
 
 An output folder can be reused: the per-sample count tables left by an earlier run are removed before mapping, so the OTU table always describes the current run only.
 
+### Reads that are not counted
+
+By default the reads that do not enter the OTU table are only counted. With **Retain unmapped reads** in the interface, or `--retain-unmapped` on the command line, they are saved as FASTQ, one file per sample, for later analysis:
+
+| Folder | Reads | Written when |
+|--------|-------|--------------|
+| `unmapped_seq/` | Reads for which minimap2 finds no alignment. | The option is on. |
+| `below_threshold_seq/` | Aligned reads removed by `--min-percent-identity` or `--min-ref-coverage`. | The option is on and at least one of the two thresholds is greater than 0. |
+
+For every sample, the reads counted in the OTU table plus the reads of the two files are the reads that passed the length filter. Each read is written with its name, sequence and qualities as in the input, whatever the strand of its alignment; the comment after the read name is not kept. A sample with no such reads gets no file. The files are `.fastq`, or `.fastq.gz` with `--gzip-intermediate`, and they are kept when `--delete-bam` removes the alignment files. The HTML report lists, for each sample, the path of the two files and the number of reads they hold; the same numbers are in `mapping_stats.json`.
+
+With the default settings almost every read aligns, so `unmapped_seq/` is small: the reads of taxa absent from the database are attributed to the closest reference and are counted there. An identity threshold moves them to `below_threshold_seq/`, together with the less accurate reads of the taxa that are present.
+
 ---
 
 ## Interactive HTML Report
 
 A single self-contained HTML file with the following sections:
 
-1. **Mapping QC** *(when `mapping_stats.json` is available)* — KPI cards (total input reads, mapped reads, mapping rate, reads after quality filter, retention rate), a badge showing the active thresholds, a stacked "mapped vs. unmapped" bar chart, a "quality-filter retention" chart and a per-sample statistics table.
+1. **Mapping QC** *(when `mapping_stats.json` is available)* — KPI cards (total input reads, mapped reads, mapping rate, reads after quality filter, retention rate), a badge showing the active thresholds, a stacked "mapped vs. unmapped" bar chart, a "quality-filter retention" chart and a per-sample statistics table. When the reads that are not counted were saved (`--retain-unmapped`), a second table gives the path of each file and the number of reads it holds.
 2. **Filter QC** — good vs. bad read counts and mean/median length per barcode.
 3. **Metagenomic analysis** — taxonomic composition at Family / Genus / Species level (interactive tabs), a log-normalised heatmap of the top OTUs, and a full searchable OTU table.
 
@@ -538,13 +555,13 @@ The tests build a small synthetic dataset on the fly. Those that need minimap2 a
 
 If you use LOREON in your research, please cite:
 
-> Scarponi, R. (2026). *LOREON: Long-Read ONT Metagenomic Pipeline* (v1.1.0). Zenodo. https://doi.org/10.5281/zenodo.22754395
+> Scarponi, R. (2026). *LOREON: Long-Read ONT Metagenomic Pipeline* (v1.1.1). Zenodo. https://doi.org/10.5281/zenodo.22754395
 
 ```bibtex
 @software{scarponi_loreon_2026,
   author    = {Scarponi, Roberto},
   title     = {{LOREON}: Long-Read {ONT} Metagenomic Pipeline},
-  version   = {1.1.0},
+  version   = {1.1.1},
   year      = {2026},
   publisher = {Zenodo},
   doi       = {10.5281/zenodo.22754395},

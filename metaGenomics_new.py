@@ -14,6 +14,7 @@ from functools import partial
 import pandas as pd
 try:
     from OtuUtils import (
+        BELOW_THRESHOLD_DIR,
         EXAMPLE_DATABASE,
         EXAMPLE_DIR,
         EXAMPLE_EXPECTED_TABLE,
@@ -22,6 +23,7 @@ try:
         LENGTH_PRESETS,
         LOREON_VERSION,
         NO_UPPER_LIMIT,
+        UNMAPPED_DIR,
         compare_otu_tables,
         create_taxonomy_map_from_fasta,
         filter_and_merge_directory,
@@ -173,6 +175,14 @@ def parse_arguments(argv=None):
     other_group.add_argument(
         "--delete-bam",
         help="Delete BAM and SAM files after tabulation to free disk space.",
+        action="store_true"
+    )
+    other_group.add_argument(
+        "--retain-unmapped",
+        help="Save the reads that are not counted, one FASTQ file per sample: the "
+             f"reads that do not align in {UNMAPPED_DIR}/ and, when "
+             "--min-percent-identity or --min-ref-coverage is set, the aligned reads "
+             f"below the thresholds in {BELOW_THRESHOLD_DIR}/.",
         action="store_true"
     )
     other_group.add_argument(
@@ -345,6 +355,8 @@ def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
     min_percent_identity = kwargs.pop('min_percent_identity', 0.0)
     min_ref_coverage = kwargs.pop('min_ref_coverage', 0.0)
     delete_bam = kwargs.pop('delete_bam', False)
+    retain_unmapped = kwargs.pop('retain_unmapped', False)
+    gzip_output = kwargs.pop('gzip_output', False)
     sample_timeout_s = kwargs.pop('sample_timeout_s', None)
     started = time.monotonic()
     try:
@@ -367,6 +379,8 @@ def run_mapping_for_one_sample(fastq_file_path: Path, **kwargs):
             min_ref_coverage=min_ref_coverage,
             delete_bam=delete_bam,
             timeout_s=remaining_s,
+            retain_unmapped=retain_unmapped,
+            gzip_output=gzip_output,
         )
         if mapping_stats is None:
             print(f"[Worker Map {sample_name}] ERROR: Counting the alignments failed.", flush=True)
@@ -682,6 +696,8 @@ def main():
         'min_percent_identity': options.min_percent_identity,
         'min_ref_coverage': options.min_ref_coverage,
         'delete_bam': options.delete_bam,
+        'retain_unmapped': options.retain_unmapped,
+        'gzip_output': options.gzip_intermediate,
         'sample_timeout_s': options.sample_timeout * 60 if options.sample_timeout > 0 else None,
     }
 
@@ -782,6 +798,7 @@ def main():
             'parameters': {
                 'min_percent_identity': options.min_percent_identity,
                 'min_ref_coverage': options.min_ref_coverage,
+                'retain_unmapped': options.retain_unmapped,
             },
             'tools': tool_versions,
             'summary': {
@@ -792,6 +809,15 @@ def main():
                 'overall_quality_retention_pct': overall_retention,
             }
         }
+        if options.retain_unmapped:
+            unmapped_saved_all = sum(s.get('unmapped_saved', 0) for s in mapping_stats_list)
+            below_saved_all = sum(s.get('below_threshold_saved', 0) for s in mapping_stats_list)
+            mapping_json['summary']['unmapped_saved_all'] = unmapped_saved_all
+            mapping_json['summary']['below_threshold_saved_all'] = below_saved_all
+            print(f"Reads that do not align, saved in {UNMAPPED_DIR}/: {unmapped_saved_all:,}")
+            if options.min_percent_identity > 0 or options.min_ref_coverage > 0:
+                print(f"Aligned reads below the thresholds, saved in {BELOW_THRESHOLD_DIR}/: "
+                      f"{below_saved_all:,}")
         mapping_stats_path = output_dir / 'mapping_stats.json'
         try:
             with open(mapping_stats_path, 'w', encoding='utf-8') as f:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.1.1 (unreleased)
+
+- New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. The option is off by default and does not change the OTU table.
+- The HTML report and `mapping_stats.json` give the path of each of these files and the number of reads it holds.
+
 ## 1.1.0 (unreleased)
 
 Changes made in response to the review of the manuscript.
