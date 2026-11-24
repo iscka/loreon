@@ -9,10 +9,6 @@
 #define AppURL       "https://github.com/iscka/loreon"
 #define AppExeName   "LOREON.exe"
 
-; Minimum Python version required
-#define PyMinMajor 3
-#define PyMinMinor 14
-
 ; ── Setup ────────────────────────────────────────────────────
 [Setup]
 AppId={{F3A2D1B0-C4E5-4F67-89AB-0123456789CD}
@@ -68,9 +64,7 @@ Name: "{commonstartup}\{#AppName}";      Filename: "{app}\{#AppExeName}"; Tasks:
 
 ; ── Post-install actions ─────────────────────────────────────
 [Run]
-; Installa dipendenze Python (solo se Python è disponibile)
-Filename: "{cmd}"; Parameters: "/C python -m pip install -r ""{app}\requirements.txt"" --quiet 2>&1"; WorkingDir: "{app}"; Flags: runhidden; StatusMsg: "Installazione dipendenze Python in corso..."; Check: IsPythonAvailable
-
+; Nessuna dipendenza Python da installare: LOREON.exe include la GUI e la pipeline gira in Docker
 ; Avvia l'applicazione al termine dell'installazione
 Filename: "{app}\{#AppExeName}"; Description: "Avvia {#AppName} {#AppVersion}"; Flags: nowait postinstall skipifsilent
 
@@ -89,29 +83,7 @@ const
   NL = #13#10;   { CRLF — defined here so #13#10 never starts a line }
 
 var
-  GDockerOK  : Boolean;
-  GPythonOK  : Boolean;
-  GPythonVer : String;   { e.g. "3.14.1" }
-
-{ ----------------------------------------------------------- }
-{  Utility: run a command and capture stdout+stderr           }
-{ ----------------------------------------------------------- }
-function ExecCapture(const Cmd, Args: String; var Output: String): Boolean;
-var
-  TmpFile   : String;
-  ResultCode: Integer;
-  AnsiOut   : AnsiString;
-begin
-  TmpFile := ExpandConstant('{tmp}\loreon_check_output.txt');
-  Result  := Exec(ExpandConstant('{cmd}'),
-                  '/C ' + Cmd + ' ' + Args + ' > "' + TmpFile + '" 2>&1',
-                  '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Output := '';
-  if FileExists(TmpFile) then begin
-    LoadStringFromFile(TmpFile, AnsiOut);
-    Output := String(AnsiOut);
-  end;
-end;
+  GDockerOK : Boolean;
 
 { ----------------------------------------------------------- }
 {  Docker: check registry then filesystem                     }
@@ -135,74 +107,6 @@ begin
 end;
 
 { ----------------------------------------------------------- }
-{  Python: parse "Python X.Y.Z" from --version output        }
-{ ----------------------------------------------------------- }
-function ParsePythonVersion(const Output: String;
-                             out Major, Minor: Integer;
-                             out Full: String): Boolean;
-var
-  S: String;
-  P: Integer;
-begin
-  Result := False;
-  Major  := 0;
-  Minor  := 0;
-  Full   := '';
-
-  P := Pos('Python ', Output);
-  if P = 0 then Exit;
-
-  S := Trim(Copy(Output, P + 7, Length(Output)));
-
-  { strip anything after the version digits }
-  Full := S;
-
-  { major }
-  P := Pos('.', S);
-  if P = 0 then Exit;
-  Major := StrToIntDef(Copy(S, 1, P - 1), -1);
-  if Major < 0 then Exit;
-  S := Copy(S, P + 1, Length(S));
-
-  { minor }
-  P := Pos('.', S);
-  if P > 0 then
-    S := Copy(S, 1, P - 1);   { drop patch }
-  Minor := StrToIntDef(Trim(S), -1);
-  if Minor < 0 then Exit;
-
-  Result := True;
-end;
-
-function CheckPythonVersion: Boolean;
-var
-  Output     : String;
-  Major, Minor: Integer;
-  Full        : String;
-begin
-  Result := False;
-
-  { Try "python" first, then "python3" }
-  if not ExecCapture('python', '--version', Output) then
-    if not ExecCapture('python3', '--version', Output) then
-      Exit;
-
-  if not ParsePythonVersion(Output, Major, Minor, Full) then Exit;
-
-  GPythonVer := Full;
-  Result := (Major > {#PyMinMajor}) or
-            ((Major = {#PyMinMajor}) and (Minor >= {#PyMinMinor}));
-end;
-
-{ ----------------------------------------------------------- }
-{  Exposed check used in [Run] section                        }
-{ ----------------------------------------------------------- }
-function IsPythonAvailable: Boolean;
-begin
-  Result := GPythonOK;
-end;
-
-{ ----------------------------------------------------------- }
 {  Open a URL in the default browser                          }
 { ----------------------------------------------------------- }
 procedure OpenURL(const URL: String);
@@ -213,67 +117,41 @@ begin
 end;
 
 { ----------------------------------------------------------- }
-{  Build the "missing components" message and offer downloads }
+{  Docker missing: explain and offer the download             }
 { ----------------------------------------------------------- }
 procedure CheckPrerequisites;
 var
   Msg       : String;
   MsgResult : Integer;
-  OpenDocker: Boolean;
-  OpenPython: Boolean;
 begin
   GDockerOK := CheckDockerInstalled;
-  GPythonOK := CheckPythonVersion;
 
-  if GDockerOK and GPythonOK then Exit;   { all good, skip dialog }
+  if GDockerOK then Exit;   { all good, skip dialog }
 
   { ---- Build message ---- }
-  Msg := 'LOREON richiede i seguenti componenti, che non sono stati rilevati sul sistema:' + NL + NL;
-
-  if not GDockerOK then
-    Msg := Msg + '  [MANCANTE]  Docker Desktop' + NL;
-
-  if not GPythonOK then begin
-    if GPythonVer <> '' then
-      Msg := Msg + '  [AGGIORNARE]  Python ' + GPythonVer +
-                   '  (richiesta >= {#PyMinMajor}.{#PyMinMinor})' + NL
-    else
-      Msg := Msg + '  [MANCANTE]  Python >= {#PyMinMajor}.{#PyMinMinor}' + NL;
-  end;
-
-  Msg := Msg + NL +
+  Msg := 'LOREON richiede Docker Desktop, che non è stato rilevato sul sistema.' + NL + NL +
          'L''installazione di LOREON può proseguire, ma l''applicazione' + NL +
-         'non funzionerà correttamente senza i componenti indicati.' + NL + NL +
-         'Vuoi aprire le pagine di download dei componenti mancanti?';
+         'non funzionerà correttamente senza Docker Desktop.' + NL + NL +
+         'Vuoi aprire la pagina di download?';
 
   MsgResult := MsgBox(Msg, mbConfirmation, MB_YESNO or MB_DEFBUTTON1);
 
   if MsgResult = IDYES then begin
-    OpenDocker := not GDockerOK;
-    OpenPython := not GPythonOK;
+    OpenURL('https://www.docker.com/products/docker-desktop/');
 
-    if OpenDocker then
-      OpenURL('https://www.docker.com/products/docker-desktop/');
-
-    if OpenPython then begin
-      Sleep(400);   { evita che il browser sovrapponga le schede }
-      OpenURL('https://www.python.org/downloads/');
-    end;
-
-    { Chiedi se l'utente ha completato le installazioni e vuole ri-verificare }
+    { Chiedi se l'utente ha completato l'installazione e vuole ri-verificare }
     Sleep(1000);
     MsgResult := MsgBox(
-      'Dopo aver installato i componenti mancanti, clicca OK per' + NL +
+      'Dopo aver installato Docker Desktop, clicca OK per' + NL +
       'ri-verificare oppure Annulla per proseguire comunque.',
       mbConfirmation, MB_OKCANCEL);
 
     if MsgResult = IDOK then begin
       { re-check }
       GDockerOK := CheckDockerInstalled;
-      GPythonOK := CheckPythonVersion;
 
-      if GDockerOK and GPythonOK then
-        MsgBox('Tutti i componenti sono stati rilevati correttamente. Ottimo!',
+      if GDockerOK then
+        MsgBox('Docker Desktop è stato rilevato correttamente. Ottimo!',
                mbInformation, MB_OK);
     end;
   end;
@@ -288,34 +166,22 @@ begin
                else Result := 'Docker Desktop: NON TROVATO';
 end;
 
-function GetPythonStatus(Param: String): String;
-begin
-  if GPythonOK then
-    Result := 'Python ' + GPythonVer + ': OK'
-  else if GPythonVer <> '' then
-    Result := 'Python ' + GPythonVer + ': VERSIONE INSUFFICIENTE'
-  else
-    Result := 'Python >= {#PyMinMajor}.{#PyMinMinor}: NON TROVATO';
-end;
-
 { ----------------------------------------------------------- }
 {  Wizard events                                              }
 { ----------------------------------------------------------- }
 procedure InitializeWizard;
 begin
-  GDockerOK  := False;
-  GPythonOK  := False;
-  GPythonVer := '';
+  GDockerOK := False;
   CheckPrerequisites;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
 begin
   Result := True;
-  { On the first page, remind if still missing components }
+  { On the first page, remind if Docker is still missing }
   if CurPageID = wpWelcome then begin
-    if not GDockerOK or not GPythonOK then begin
-      if MsgBox('Alcuni componenti sono ancora mancanti.' + NL +
+    if not GDockerOK then begin
+      if MsgBox('Docker Desktop è ancora mancante.' + NL +
                 'Vuoi procedere comunque con l''installazione?',
                 mbConfirmation, MB_YESNO) = IDNO then
         Result := False;

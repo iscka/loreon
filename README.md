@@ -85,7 +85,7 @@ Python **≥ 3.9**.
 
 ### Windows
 
-- [Python](https://www.python.org/downloads/) ≥ 3.9 (for the GUI on the host)
+- [Python](https://www.python.org/downloads/) ≥ 3.9, only to run the GUI from the source code: the application installed with the Windows installer does not need it
 - [Docker Desktop](https://www.docker.com/products/docker-desktop) with the WSL 2 backend — minimap2, samtools and the pipeline run inside the container, so they do **not** need to be installed on the host.
 
 ### Python dependencies
@@ -139,7 +139,7 @@ With this route:
 
 `python pipeline_gui.py` explains what is wrong, instead of failing with a Qt error, when PyQt5 is not installed, when system libraries are missing, and when there is no graphical session (for example over `ssh` without display forwarding; use the [command line](#command-line-reference) there). When the window opens, the log lists the components that are missing for an analysis on this computer (minimap2, samtools, Python packages, or Docker in Docker mode) and how to install them; **START PIPELINE** shows the same list instead of starting a run that cannot succeed.
 
-The bundled `venv_manager.py` can also create and validate a dedicated virtual environment automatically; the packaged application uses it to locate a suitable Python interpreter for the pipeline subprocesses.
+The bundled `venv_manager.py` can also create and validate a dedicated virtual environment automatically; the packaged application for Linux and macOS uses it to locate a suitable Python interpreter for the pipeline subprocesses. On Windows the pipeline runs in Docker and no virtual environment is created.
 
 ---
 
@@ -472,7 +472,7 @@ Metrics collected per step include `wall_time_s`, `cpu_time_s`, `mem_mb`, plus s
 
 On Windows, LOREON runs in mixed mode: the GUI is native, while minimap2, samtools and the pipeline run inside a Docker container built from the included `Dockerfile` (Ubuntu 22.04 with minimap2 2.28 and samtools 1.21 compiled from the official source releases, whose checksums are verified during the build, plus the Python pipeline). The first build downloads and compiles the two tools and takes a few minutes.
 
-1. Install Docker Desktop (WSL 2 backend) and Python ≥ 3.9.
+1. Install Docker Desktop (WSL 2 backend) and, to run the GUI from the source code, Python ≥ 3.9.
 2. Launch the GUI (`python pipeline_gui.py` or the installed executable).
 3. In group **3. Docker**, tick **Use Docker** and click **Build Image** (first run only) — this builds the `loreon:latest` image.
 4. Select the input folder, database FASTA and output folder, then click **START PIPELINE**.

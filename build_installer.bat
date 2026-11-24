@@ -101,7 +101,7 @@ echo.
 
 if %ERRORLEVEL% neq 0 (
     echo.
-    echo [ERRORE] Compilazione fallita (codice %ERRORLEVEL%).
+    echo [ERRORE] Compilazione fallita ^(codice %ERRORLEVEL%^).
     pause
     exit /b %ERRORLEVEL%
 )

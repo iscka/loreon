@@ -1,4 +1,5 @@
 """Graphical interface defaults and the worker that launches the pipeline."""
+import sys
 import threading
 import time
 
@@ -11,6 +12,7 @@ from PyQt5.QtWidgets import QApplication, QDialog, QMessageBox
 import OtuUtils
 import pipeline_gui
 import pipeline_worker
+import venv_manager
 from helpers import SYSTEM_PATH, make_tool
 
 
@@ -433,3 +435,23 @@ def test_differing_example_result_is_announced(window, dialogs, tmp_path):
     lines = OtuUtils.EXAMPLE_EXPECTED_TABLE.read_text().splitlines()
     finish_example_run(window, tmp_path, '\n'.join(lines[:-1]) + '\n')
     assert ('warning', True) in [(kind, 'differs' in text) for kind, text in dialogs]
+
+
+def test_installed_windows_application_does_not_create_a_virtual_environment(app, monkeypatch):
+    used = []
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'platform', 'win32')
+    monkeypatch.setattr(venv_manager, 'is_venv_ready', lambda: used.append('check') or False)
+    monkeypatch.setattr(venv_manager, 'create_venv', lambda progress_callback=None: used.append('create'))
+    assert pipeline_gui._ensure_venv(app) is True
+    assert used == []
+
+
+def test_installed_application_still_creates_it_on_other_systems(app, monkeypatch):
+    used = []
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    monkeypatch.setattr(sys, 'platform', 'linux')
+    monkeypatch.setattr(venv_manager, 'is_venv_ready', lambda: used.append('check') or False)
+    monkeypatch.setattr(venv_manager, 'create_venv', lambda progress_callback=None: used.append('create'))
+    assert pipeline_gui._ensure_venv(app) is True
+    assert used == ['check', 'create']

@@ -4,6 +4,8 @@
 
 - New option **Retain unmapped reads** in the interface, `--retain-unmapped` on the command line: the reads that are not counted are saved as FASTQ, one file per sample. Reads that do not align go to `unmapped_seq/`; when an identity or read-coverage threshold is set, the aligned reads below the thresholds go to `below_threshold_seq/`. The option is off by default and does not change the OTU table.
 - The HTML report and `mapping_stats.json` give the path of each of these files and the number of reads it holds.
+- Windows: the installer no longer installs Python packages or asks for Python, and the installed application no longer creates a virtual environment at first launch. Both were unused, because the interface is self-contained and the pipeline runs in Docker.
+- Windows: the installer includes the icon used by its shortcuts, and `build_installer.bat` no longer ends with an error after a successful compilation.
 
 ## 1.1.0 (unreleased)
 

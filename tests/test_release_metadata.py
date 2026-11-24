@@ -79,3 +79,9 @@ def test_every_package_ships_the_licence_text(script):
     lines = [line for line in read(script).splitlines()
              if 'LICENSE' in line and not line.lstrip().startswith(('#', 'REM', '::'))]
     assert lines, script
+
+
+def test_windows_installer_does_not_install_python_packages():
+    script = read('installer.iss')
+    assert 'pip install' not in script
+    assert 'Python' not in script.split('[Code]')[1]

@@ -51,6 +51,7 @@ copy Dockerfile dist\LOREON\
 copy requirements.txt dist\LOREON\
 if exist .dockerignore copy .dockerignore dist\LOREON\
 copy loreon_app_icon_2.png dist\LOREON\
+copy loreon_app_icon_2.ico dist\LOREON\
 copy loreon.jpeg dist\LOREON\
 copy credits.md dist\LOREON\
 copy LICENSE dist\LOREON\

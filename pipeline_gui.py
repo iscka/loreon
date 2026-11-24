@@ -944,10 +944,11 @@ class MainWindow(QMainWindow):
 def _ensure_venv(app):
     """Check and create the pipeline virtualenv when running from a frozen bundle.
 
-    Shows a progress dialog during first-time setup.  If the venv is
-    already present and valid, returns immediately.
+    Not needed on Windows, where every analysis runs inside Docker.
+    Elsewhere, shows a progress dialog during first-time setup.  If the venv
+    is already present and valid, returns immediately.
     """
-    if not getattr(sys, 'frozen', False):
+    if not getattr(sys, 'frozen', False) or sys.platform == 'win32':
         return True
 
     from venv_manager import is_venv_ready, create_venv
